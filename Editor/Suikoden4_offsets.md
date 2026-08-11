@@ -158,3 +158,30 @@ recomputes them before committing, then refreshes each memcard page's Hamming EC
 Playtime appears mirrored as several incrementing u32 copies (+0x108, +0x2E8, +0x5B8,
 +0x720 all step by 112 between the 4:42 and 4:49 saves). Potch offset in the save is
 still **UNCONFIRMED** (RAM potch is +0x535EF8, but the save is a compacted structure).
+
+## FILEDATA archive format (BI1 / BI2) — CRACKED
+`FILEDATA.BI1` and `FILEDATA.BI2` are packed archives (NOT flat data). Header + file table:
+- `+0x00` u32 magic `0x82734927`
+- `+0x04` u32 = 0
+- `+0x08` u32 total archive size
+- `+0x0C` u32 = 0
+- `+0x10` onward: 16-byte entries `(id u32, flags u32, offset u32, size u32)`.
+  - `id` is a content hash/key (e.g. 0xE94F, 0x50EC); families share high bits.
+  - `flags`: 0 = stored, 2 = compressed (observed on the larger paired entries).
+  - `offset` is relative to the archive (file) start; entries are offset-ordered.
+  - Header row's first field doubles as the entry count (BI2: 0x38 = 56 slots).
+BI2 (60MB) has 55 real entries; many appear as a 256-byte header entry (flags 0)
+immediately followed by a flags=2 data entry — a header+compressed-payload pairing.
+`FILEDATA.BIN` is unrelated (starts with a copy of SYSTEM.CNF text).
+
+STATUS: container format decoded; the per-entry compression (flags=2) and which entry
+holds character/item/spell tables are not yet mapped. Editing needs: identify the target
+entry, decompress it, edit, recompress, fix offsets/sizes. Deferred — big effort, and the
+save editor already covers character/rune/equipment editing for existing playthroughs.
+
+## Spell / unite tables — NOT yet located
+S3 kept spell/unite parameter tables in the ELF 2nd PT_LOAD, findable by an ascending
+damage curve. S4's ELF 2nd PT_LOAD (file 0x278480, vaddr 0x4F7480) was scanned the same
+way; the ascending-field heuristic is too noisy here (hit only lookup ramps like a
+37,39,41,… scaling table at vaddr 0x589FB0, not spells). Needs a name-string or
+damage-value anchor from a guide to pin the table. Deferred.
