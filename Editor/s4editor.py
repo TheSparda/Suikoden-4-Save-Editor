@@ -178,7 +178,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not path or not os.path.isfile(path):
                     return self._send(200, {"error": "file not found"})
                 save_config(lastCardRoot=os.path.dirname(path))
-                runes = [{"id": k, "name": v} for k, v in sorted(P.RUNE_NAMES.items())]
+                # rune ids as INTEGERS so they match the integer rune values in each
+                # character record (the JSON keys are hex strings like "0B").
+                runes = sorted(({"id": int(k, 16), "name": v}
+                                for k, v in P.RUNE_NAMES.items()), key=lambda r: r["id"])
                 return self._send(200, {"ok": True, "path": path, "runes": runes,
                                         "saves": SV.read_all_s4_saves(path)})
             if self.path == "/api/save-write":
@@ -366,7 +369,7 @@ async function scanCards(){$('#cardlist').textContent='scanning…';const r=awai
  if(!r.cards||!r.cards.length){$('#cardlist').textContent='no PS2 cards found nearby.';return;}
  $('#cardlist').innerHTML='<div class="row" style="margin:8px 0">'+r.cards.map(c=>
    `<button onclick="readSave('${esc(c.path)}')">${esc(c.name)} ${c.hasS4?'<span class=\"badge ok\">S4</span>':''} <span class="mut">${c.mb}MB</span></button>`).join('')+'</div>';}
-let RUNE_OPTS='';   // <option> list for rune dropdowns, built on read
+let RUNE_LIST=[];   // [{id:int,name}] for rune dropdowns, built on read
 function renderSaves(saves){
  $('#saveout').innerHTML=saves.map(sv=>{
   const cksum=sv.checksumValid?'<span class="badge ok">checksum ok</span>':'<span class="badge ro">checksum off</span>';
@@ -377,7 +380,9 @@ function renderSaves(saves){
     const num=(lbl,f,v,mx)=>`<div class="fld"><label>${lbl}</label>`+
       `<input type="number" min="0" max="${mx}" value="${v}" data-ch="${cid}|${f}"></div>`;
     const rune=(slot,label)=>{
-      const opts=RUNE_OPTS.replace(`value="${c.runes[slot]}"`,`value="${c.runes[slot]}" selected`);
+      const cur=c.runes[slot];
+      const opts=RUNE_LIST.map(r=>
+        `<option value="${r.id}"${r.id===cur?' selected':''}>${esc(r.name)}</option>`).join('');
       return `<div class="fld"><label>${label}</label>`+
         `<select data-ch="${cid}|rune:${slot}">${opts}</select></div>`;};
     return `<div class="charcard"><h4>${esc(c.name)} <span class="lvl">#${c.rosterIndex}</span></h4>
@@ -397,7 +402,7 @@ async function readSave(path){$('#saveout').innerHTML='<p class="mut">reading…
  const r=await api('/api/read-save',{path});
  if(r.error)return $('#saveout').innerHTML='<p style="color:var(--bad)">'+esc(r.error)+'</p>';
  if(!r.saves.length)return $('#saveout').innerHTML='<p class="mut">no Suikoden IV saves on this card.</p>';
- RUNE_OPTS=(r.runes||[]).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
+ RUNE_LIST=r.runes||[];
  cardPath=r.path;renderSaves(r.saves);}
 async function writeSave(folder){
  if(!cardPath)return;
