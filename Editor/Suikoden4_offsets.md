@@ -92,6 +92,30 @@ Header (confirmed by hexdump + cross-save diff of 3 saves in the same playthroug
 | +0x0C | u32 | **CRC32** of `gamedata[0x20:0x20+0xE240]` (little-endian) | **CRACKED** — verified on all saves. |
 | +0x10 | 16 bytes | **MD5** of `gamedata[0x20:0x20+0xE240]`, **byte-reversed** | **CRACKED** — the game stores the 16-byte MD5 digest in reverse byte order. Verified on all saves. |
 
+## Character records (corrected)
+**Record size = 0xF0 (240 bytes)**, array starts at gamedata `0x1E4`, one record per roster
+index (`index = cheat_table_offset / 0x78`). An earlier reading used stride `0x78`, which is
+wrong: `0x78` is half a record, so it only aligned for index 0 (the Hero) and mislabeled
+everyone else. Proven with known anchors across two independent playthroughs — Hero (idx 0)
+holds the Rune of Punishment; Ted (idx 3) always holds the Soul Eater — both decode exactly,
+and every roster name lines up.
+
+Within each record (offsets relative to record base at `0x1E4 + index*0xF0`):
+| Offset | Type | Field |
+|---|---|---|
+| +0x00 | u16 (low byte = id) | Rune slot 1 |
+| +0x02 | u16 (low byte = id) | Rune slot 2 |
+| +0x04 | u16 (low byte = id) | Rune slot 3 |
+| +0x74 | u16 | EXP toward next (stat sub-block starts here; lands at 0x258 for idx 0) |
+| +0x74+0x0A | u16 | Current HP (reads 0 when saved out of battle) |
+| +0x74+0x1E | u16 | Max HP |
+| +0x74+0x20 | u16[8] | STR SKL MAG EVA PDF MDF SPD LUK |
+
+Equipment slots also live in the record (past the stat block) but their exact offsets are not
+yet pinned — that region interleaves gear with level-scaled growth data and is easy to
+misread, so equipment editing waits for a controlled before/after save. Runes + stats + HP
+are verified and write-enabled.
+
 ### Checksum, fully solved (write-enabled)
 Found by disassembling `SLUS_209.79` (MIPS64, PS2). The save serializer at vaddr
 `0x471C34` calls, over `base = gamedata+0x20`, `len = 0xE240` (57920 bytes):

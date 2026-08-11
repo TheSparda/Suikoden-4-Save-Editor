@@ -178,7 +178,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not path or not os.path.isfile(path):
                     return self._send(200, {"error": "file not found"})
                 save_config(lastCardRoot=os.path.dirname(path))
-                return self._send(200, {"ok": True, "path": path,
+                runes = [{"id": k, "name": v} for k, v in sorted(P.RUNE_NAMES.items())]
+                return self._send(200, {"ok": True, "path": path, "runes": runes,
                                         "saves": SV.read_all_s4_saves(path)})
             if self.path == "/api/save-write":
                 path = b.get("path", "")
@@ -353,6 +354,7 @@ async function scanCards(){$('#cardlist').textContent='scanning…';const r=awai
  if(!r.cards||!r.cards.length){$('#cardlist').textContent='no PS2 cards found nearby.';return;}
  $('#cardlist').innerHTML='<div class="row" style="margin:8px 0">'+r.cards.map(c=>
    `<button onclick="readSave('${esc(c.path)}')">${esc(c.name)} ${c.hasS4?'<span class=\"badge ok\">S4</span>':''} <span class="mut">${c.mb}MB</span></button>`).join('')+'</div>';}
+let RUNE_OPTS='';   // <option> list for rune dropdowns, built on read
 function renderSaves(saves){
  $('#saveout').innerHTML=saves.map(sv=>{
   const cksum=sv.checksumValid?'<span class="badge ok">checksum ok</span>':'<span class="badge ro">checksum off</span>';
@@ -360,22 +362,27 @@ function renderSaves(saves){
     <td><input type="text" class="mono" data-name="${esc(n.folder)}|${esc(n.key)}" value="${esc(n.value)}" maxlength="${n.max}" size="18"></td></tr>`).join('');
   const chars=(sv.characters||[]).map(c=>{
     const st=c.stats;
-    const cell=(f,v,mx)=>`<input type="number" min="0" max="${mx}" value="${v}" style="width:70px" data-ch="${esc(sv.folder)}|${c.rosterIndex}|${f}">`;
+    const cell=(f,v,mx)=>`<input type="number" min="0" max="${mx}" value="${v}" data-ch="${esc(sv.folder)}|${c.rosterIndex}|${f}">`;
+    const rune=(slot)=>`<select data-ch="${esc(sv.folder)}|${c.rosterIndex}|rune:${slot}">${RUNE_OPTS}</select>`.replace(
+      `value="${c.runes[slot]}"`,`value="${c.runes[slot]}" selected`);
     return `<tr><td>${esc(c.name)}</td>
       <td>${cell('curHP',c.curHP,9999)}</td><td>${cell('maxHP',c.maxHP,9999)}</td>
-      ${['STR','SKL','MAG','EVA','PDF','MDF','SPD','LUK'].map(k=>`<td>${cell('stat:'+k,st[k],999)}</td>`).join('')}</tr>`;}).join('');
+      ${['STR','SKL','MAG','EVA','PDF','MDF','SPD','LUK'].map(k=>`<td>${cell('stat:'+k,st[k],999)}</td>`).join('')}
+      <td>${rune(0)}</td><td>${rune(1)}</td><td>${rune(2)}</td></tr>`;}).join('');
   return `<div class="card"><div class="row"><b>${esc(sv.label)}</b>
     <span class="mono mut">${esc(sv.folder)}</span>${cksum}<span class="sp"></span>
     <span class="mono mut">${esc(sv.meta&&sv.meta.title||'')}</span>
     <button class="pri" onclick="writeSave('${esc(sv.folder)}')">Write ${esc(sv.label)}</button></div>
     <table><tbody>${nameRows}</tbody></table>
     <div class="scroll" style="margin-top:10px"><table><thead><tr><th>Character</th><th>Cur HP</th><th>Max HP</th>
-     <th>STR</th><th>SKL</th><th>MAG</th><th>EVA</th><th>PDF</th><th>MDF</th><th>SPD</th><th>LUK</th></tr></thead>
+     <th>STR</th><th>SKL</th><th>MAG</th><th>EVA</th><th>PDF</th><th>MDF</th><th>SPD</th><th>LUK</th>
+     <th>Rune 1</th><th>Rune 2</th><th>Rune 3</th></tr></thead>
      <tbody>${chars}</tbody></table></div></div>`;}).join('');}
 async function readSave(path){$('#saveout').innerHTML='<p class="mut">reading…</p>';
  const r=await api('/api/read-save',{path});
  if(r.error)return $('#saveout').innerHTML='<p style="color:var(--bad)">'+esc(r.error)+'</p>';
  if(!r.saves.length)return $('#saveout').innerHTML='<p class="mut">no Suikoden IV saves on this card.</p>';
+ RUNE_OPTS=(r.runes||[]).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
  cardPath=r.path;renderSaves(r.saves);}
 async function writeSave(folder){
  if(!cardPath)return;
@@ -384,6 +391,7 @@ async function writeSave(folder){
    const [,ridx,field]=el.dataset.ch.split('|');
    charEdits[ridx]=charEdits[ridx]||{};
    if(field.startsWith('stat:')){charEdits[ridx].stats=charEdits[ridx].stats||{};charEdits[ridx].stats[field.slice(5)]=+el.value;}
+   else if(field.startsWith('rune:')){charEdits[ridx].runes=charEdits[ridx].runes||{};charEdits[ridx].runes[field.slice(5)]=+el.value;}
    else charEdits[ridx][field]=+el.value;}
  for(const el of document.querySelectorAll(`[data-name^="${folder}|"]`)){
    const key=el.dataset.name.split('|')[1];nameEdits[key]=el.value;}

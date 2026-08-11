@@ -63,17 +63,32 @@ MD5_OFF       = 0x10     # 16-byte MD5 of BODY, stored byte-reversed
 BODY_OFF      = 0x20     # checksummed region start
 BODY_LEN      = 0xE240   # checksummed region length (57920 bytes)
 
-# --- character records (found at 0x258, stride 0x78 — same shape as the CT RAM map) ---
-CHAR_BASE   = 0x258
-CHAR_STRIDE = 0x78
-OFF_EXP     = 0x00       # u16 experience toward next
-OFF_CURHP   = 0x0A       # u16 current HP
-OFF_MAXHP   = 0x1E       # u16 max HP
-OFF_STATS   = 0x20       # u16[8]: STR SKL MAG EVA PDF MDF SPD LUK
+# --- character records -----------------------------------------------------------
+# Each character record is 0xF0 (240) bytes. The record BASE is the rune block; the stat
+# sub-block sits +0x74 into the record (so char0's stats land at 0x258, which is why an
+# earlier 0x78-stride reading worked for char0 only — 0x78 aliased two halves of the real
+# 0xF0 record and mislabeled every other character).
+#
+# Layout PROVEN against two independent playthroughs using known anchors: Hero (idx0) holds
+# the Rune of Punishment; Ted (idx3) always holds the Soul Eater. Both decode exactly, and
+# every roster name lines up (Elenor, Snowe, …). Ted's CT roster index is 3.
+CHAR_BASE   = 0x1E4      # record 0 base (rune block). stat sub-block = 0x258 = 0x1E4 + 0x74
+CHAR_STRIDE = 0xF0       # true per-character record size (240 bytes)
+CT_STRIDE   = 0x78       # the cheat-table offset unit; roster index = ct_offset // 0x78
+# rune slots (3 per character), low byte of each u16 at the record start
+OFF_RUNES   = (0x00, 0x02, 0x04)
+RUNE_SLOTS  = 3
+# stat sub-block, offsets RELATIVE TO THE RECORD BASE (add 0x74 to reach the stat area)
+STAT_BASE   = 0x74
+OFF_EXP     = STAT_BASE + 0x00   # u16 experience toward next
+OFF_CURHP   = STAT_BASE + 0x0A   # u16 current HP (reads 0 when saved out of battle)
+OFF_MAXHP   = STAT_BASE + 0x1E   # u16 max HP
+OFF_STATS   = STAT_BASE + 0x20   # u16[8]: STR SKL MAG EVA PDF MDF SPD LUK
 STAT_NAMES  = ["STR", "SKL", "MAG", "EVA", "PDF", "MDF", "SPD", "LUK"]
-# equipment lives in a parallel structure; per the CT the equip array base sits 0x48
-# before the exp/stat base in RAM. In the save the equipment block offset is not yet
-# confirmed, so equipment editing is deferred (stats/hp/exp are confirmed here).
+# Equipment slots exist within the record but their exact offsets are NOT yet verified
+# (the region past the stat block holds equipment + level-scaled growth data that is easy
+# to misread). Equipment editing stays deferred until a controlled before/after save pins
+# the slots; runes + stats + HP are proven and editable.
 
 def _char_names():
     """rosterIndex -> name, from s4_char_offsets.json (offset/0x78)."""
@@ -81,10 +96,20 @@ def _char_names():
     try:
         import json
         raw = json.load(open(os.path.join(here, "s4_char_offsets.json")))
-        return {int(k, 16) // CHAR_STRIDE: v for k, v in raw.items()}
+        return {int(k, 16) // CT_STRIDE: v for k, v in raw.items()}
     except Exception:
         return {}
 CHAR_NAMES = _char_names()
+
+def _rune_names():
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        import json
+        raw = json.load(open(os.path.join(here, "s4_rune_names.json")))
+        return {int(k, 16): v for k, v in raw.items()}
+    except Exception:
+        return {}
+RUNE_NAMES = _rune_names()
 
 
 def recompute_checksums(gamedata):
@@ -287,6 +312,7 @@ def decode_character(gamedata, roster_index):
         return None
     stats = list(struct.unpack_from("<8H", gamedata, off + OFF_STATS))
     maxhp = struct.unpack_from("<H", gamedata, off + OFF_MAXHP)[0]
+    runes = [gamedata[off + ro] for ro in OFF_RUNES]   # low byte of each rune slot
     return {
         "rosterIndex": roster_index,
         "name": CHAR_NAMES.get(roster_index, f"#{roster_index}"),
@@ -295,14 +321,17 @@ def decode_character(gamedata, roster_index):
         "curHP": struct.unpack_from("<H", gamedata, off + OFF_CURHP)[0],
         "maxHP": maxhp,
         "stats": dict(zip(STAT_NAMES, stats)),
-        "hasData": maxhp > 0 or sum(stats) > 0,
+        "runes": runes,
+        "runeNames": [RUNE_NAMES.get(r, "") for r in runes],
+        "hasData": maxhp > 0 or sum(stats) > 0 or any(runes),
     }
 
 
 def decode_characters(gamedata):
     n = (len(gamedata) - CHAR_BASE) // CHAR_STRIDE
-    return [c for c in (decode_character(gamedata, i)
-                        for i in range(min(n, len(CHAR_NAMES) or n))) if c]
+    if CHAR_NAMES:
+        n = min(n, max(CHAR_NAMES) + 1)
+    return [c for c in (decode_character(gamedata, i) for i in range(n)) if c]
 
 
 def decode_save(gamedata):
@@ -355,6 +384,13 @@ def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None):
                     if sname in STAT_INDEX:
                         struct.pack_into("<H", b, base + OFF_STATS + STAT_INDEX[sname]*2,
                                          _clamp(sval, 2)); changed += 1
+            elif k == "runes":
+                # {slot(0..2): rune_id}. Write only the low byte of the rune u16 slot;
+                # leave the high byte untouched (it is not part of the rune id).
+                for slot, rid in (v or {}).items():
+                    slot = int(slot)
+                    if 0 <= slot < RUNE_SLOTS:
+                        b[base + OFF_RUNES[slot]] = _clamp(rid, 1); changed += 1
             elif k in CHAR_FIELDS:
                 off, w = CHAR_FIELDS[k]
                 struct.pack_into({1:"<B",2:"<H",4:"<I"}[w], b, base + off, _clamp(v, w))
