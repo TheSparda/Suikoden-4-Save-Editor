@@ -14,13 +14,14 @@ Layout facts (validated 2026-08-10 against 5 real saves; see Suikoden4_offsets.m
     digest/checksum (SHA1-shaped, salted/custom — NOT yet cracked), hero/ship names as
     ASCII from ~0x28.
 
-WRITING is intentionally NOT implemented: the 0x0C..0x1F digest is a save-load gate
-whose algorithm is unsolved, so a modified save could fail to load. This module is the
-read-only foundation; write support is deferred until that digest is cracked. The PS2MFS
-walker + Hamming ECC below are the same verified code as the S3 editor, so once the
-digest falls, in-place write-back drops straight in.
+WRITING is supported: the save digest was reverse-engineered from SLUS_209.79 (see
+Suikoden4_offsets.md). Over body = gamedata[0x20:0x20+0xE240]:
+  - +0x0C u32 = CRC32(body)                    (standard reflected, little-endian)
+  - +0x10..  = MD5(body) with the 16 bytes byte-REVERSED
+Write-back recomputes both, then refreshes each memcard page's Hamming ECC. A backup
+of the whole card is made before the first write.
 """
-import struct, os
+import struct, os, shutil, hashlib, zlib
 
 MAGIC = b"Sony PS2 Memory Card Format"
 S4_PREFIX = "BASLUS-20979"     # USA Suikoden IV save-folder prefix on the memcard
@@ -55,8 +56,45 @@ def ecc_page(page512):
 GD_SIZE       = 57952
 OFF_VERSION   = 0x00     # u32, = 6
 OFF_SLOT      = 0x08     # u16, matches folder suffix
-DIGEST_OFF    = 0x0C     # 20 bytes, SHA1-shaped save-load gate (uncracked)
+DIGEST_OFF    = 0x0C     # 20 bytes total: CRC32 (u32) + reversed MD5 (16 bytes)
 DIGEST_LEN    = 20
+CRC_OFF       = 0x0C     # u32 little-endian CRC32 of BODY
+MD5_OFF       = 0x10     # 16-byte MD5 of BODY, stored byte-reversed
+BODY_OFF      = 0x20     # checksummed region start
+BODY_LEN      = 0xE240   # checksummed region length (57920 bytes)
+
+# --- character records (found at 0x258, stride 0x78 — same shape as the CT RAM map) ---
+CHAR_BASE   = 0x258
+CHAR_STRIDE = 0x78
+OFF_EXP     = 0x00       # u16 experience toward next
+OFF_CURHP   = 0x0A       # u16 current HP
+OFF_MAXHP   = 0x1E       # u16 max HP
+OFF_STATS   = 0x20       # u16[8]: STR SKL MAG EVA PDF MDF SPD LUK
+STAT_NAMES  = ["STR", "SKL", "MAG", "EVA", "PDF", "MDF", "SPD", "LUK"]
+# equipment lives in a parallel structure; per the CT the equip array base sits 0x48
+# before the exp/stat base in RAM. In the save the equipment block offset is not yet
+# confirmed, so equipment editing is deferred (stats/hp/exp are confirmed here).
+
+def _char_names():
+    """rosterIndex -> name, from s4_char_offsets.json (offset/0x78)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        import json
+        raw = json.load(open(os.path.join(here, "s4_char_offsets.json")))
+        return {int(k, 16) // CHAR_STRIDE: v for k, v in raw.items()}
+    except Exception:
+        return {}
+CHAR_NAMES = _char_names()
+
+
+def recompute_checksums(gamedata):
+    """Return a copy of gamedata with CRC32 + reversed-MD5 recomputed over the body.
+    This is the exact algorithm SLUS_209.79 uses to gate save loading."""
+    b = bytearray(gamedata)
+    body = bytes(b[BODY_OFF:BODY_OFF + BODY_LEN])
+    struct.pack_into("<I", b, CRC_OFF, zlib.crc32(body) & 0xFFFFFFFF)
+    b[MD5_OFF:MD5_OFF + 16] = hashlib.md5(body).digest()[::-1]
+    return bytes(b)
 
 # Editable-looking name fields, ASCII null-padded. Offsets from hexdump of real saves;
 # widths are conservative (stop at the next field). Cross-verified: hero "Sparda", ship
@@ -160,6 +198,54 @@ class MemCard:
                 return self._chain(e["cluster"], e["length"])[:e["length"]]
         return None
 
+    # ---- write support (same in-place, ECC-refreshing approach as the S3 editor) ----
+    def _chain_clusters(self, first, size):
+        clusters, c = [], first
+        while size > 0 and (c & 0x7FFFFFFF) != 0x7FFFFFFF and c != 0xFFFFFFFF:
+            clusters.append((c & 0x7FFFFFFF) + self.alloc_offset)
+            nxt = self._fat(c & 0x7FFFFFFF)
+            if nxt == 0xFFFFFFFF:
+                break
+            c = nxt
+            size -= self.cluster_size
+        return clusters
+
+    def _write_page(self, page_num, data512):
+        off = page_num * self.raw_page
+        self.data[off:off + self.page_len] = data512
+        if self.raw_page >= self.page_len + 16:
+            self.data[off + self.page_len:off + self.page_len + 16] = ecc_page(data512)
+
+    def _write_cluster(self, cluster_num, data):
+        base = cluster_num * self.pages_per_cluster
+        for i in range(self.pages_per_cluster):
+            seg = data[i*self.page_len:(i+1)*self.page_len]
+            if len(seg) < self.page_len:
+                seg = seg + b"\x00" * (self.page_len - len(seg))
+            self._write_page(base + i, seg)
+
+    def write_file(self, dir_cluster, dir_len, filename, new_content):
+        """Replace a file's bytes in place (same length) and refresh ECC."""
+        ent = None
+        for e in self._listdir(dir_cluster, dir_len):
+            if e["name"] == filename and not e["is_dir"]:
+                ent = e; break
+        if ent is None:
+            raise KeyError(f"{filename} not found")
+        if len(new_content) != ent["length"]:
+            raise ValueError(f"length changed ({len(new_content)} != {ent['length']}); "
+                             "in-place write only")
+        clusters = self._chain_clusters(ent["cluster"], ent["length"])
+        for i, cnum in enumerate(clusters):
+            seg = new_content[i*self.cluster_size:(i+1)*self.cluster_size]
+            if not seg:
+                break
+            self._write_cluster(cnum, seg)
+        return len(clusters)
+
+    def to_bytes(self):
+        return bytes(self.data)
+
 
 def load_card(path):
     with open(path, "rb") as f:
@@ -195,18 +281,112 @@ def _title_from_icon_sys(ic):
     return out
 
 
+def decode_character(gamedata, roster_index):
+    off = CHAR_BASE + roster_index * CHAR_STRIDE
+    if off + CHAR_STRIDE > len(gamedata):
+        return None
+    stats = list(struct.unpack_from("<8H", gamedata, off + OFF_STATS))
+    maxhp = struct.unpack_from("<H", gamedata, off + OFF_MAXHP)[0]
+    return {
+        "rosterIndex": roster_index,
+        "name": CHAR_NAMES.get(roster_index, f"#{roster_index}"),
+        "addr": off,
+        "exp": struct.unpack_from("<H", gamedata, off + OFF_EXP)[0],
+        "curHP": struct.unpack_from("<H", gamedata, off + OFF_CURHP)[0],
+        "maxHP": maxhp,
+        "stats": dict(zip(STAT_NAMES, stats)),
+        "hasData": maxhp > 0 or sum(stats) > 0,
+    }
+
+
+def decode_characters(gamedata):
+    n = (len(gamedata) - CHAR_BASE) // CHAR_STRIDE
+    return [c for c in (decode_character(gamedata, i)
+                        for i in range(min(n, len(CHAR_NAMES) or n))) if c]
+
+
 def decode_save(gamedata):
-    """Decode one save's gamedata payload (header + names). Read-only view."""
+    """Decode one save's gamedata payload (header + names + characters)."""
     names = [{"key": key, "label": label, "value": _read_str(gamedata, off, n), "max": n}
              for key, off, n, label in NAME_FIELDS]
+    body = gamedata[BODY_OFF:BODY_OFF + BODY_LEN]
+    stored = gamedata[CRC_OFF:CRC_OFF + 4] + gamedata[MD5_OFF:MD5_OFF + 16]
+    calc = (struct.pack("<I", zlib.crc32(body) & 0xFFFFFFFF)
+            + hashlib.md5(body).digest()[::-1])
     return {
         "size": len(gamedata),
         "version": struct.unpack_from("<I", gamedata, OFF_VERSION)[0],
         "slot": struct.unpack_from("<H", gamedata, OFF_SLOT)[0],
         "digest": gamedata[DIGEST_OFF:DIGEST_OFF + DIGEST_LEN].hex(),
+        "checksumValid": stored == calc,
         "names": names,
-        "writable": False,   # checksum uncracked — read-only for now
+        "characters": [c for c in decode_characters(gamedata) if c["hasData"]],
+        "writable": True,
     }
+
+
+# --- editing --------------------------------------------------------------------
+CHAR_FIELDS = {"curHP": (OFF_CURHP, 2), "maxHP": (OFF_MAXHP, 2), "exp": (OFF_EXP, 2)}
+STAT_INDEX = {n: i for i, n in enumerate(STAT_NAMES)}
+
+def _clamp(v, width):
+    return max(0, min((1 << (8 * width)) - 1, int(v)))
+
+def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None):
+    """char_edits: {rosterIndex: {field: value, "stats": {STAT: value}}}.
+    name_edits:   {nameKey: "text"}.  Returns (new_gamedata_with_fixed_checksums, changed)."""
+    b = bytearray(gamedata)
+    changed = 0
+    name_off = {k: (o, n) for k, o, n, _ in NAME_FIELDS}
+    for key, val in (name_edits or {}).items():
+        if key not in name_off:
+            continue
+        off, n = name_off[key]
+        enc = str(val).encode("latin1", "replace")[:n]
+        b[off:off + n] = enc + b"\x00" * (n - len(enc))
+        changed += 1
+    for ridx, fields in (char_edits or {}).items():
+        base = CHAR_BASE + int(ridx) * CHAR_STRIDE
+        if base + CHAR_STRIDE > len(b):
+            continue
+        for k, v in fields.items():
+            if k == "stats":
+                for sname, sval in (v or {}).items():
+                    if sname in STAT_INDEX:
+                        struct.pack_into("<H", b, base + OFF_STATS + STAT_INDEX[sname]*2,
+                                         _clamp(sval, 2)); changed += 1
+            elif k in CHAR_FIELDS:
+                off, w = CHAR_FIELDS[k]
+                struct.pack_into({1:"<B",2:"<H",4:"<I"}[w], b, base + off, _clamp(v, w))
+                changed += 1
+    return recompute_checksums(bytes(b)), changed
+
+
+def write_save_edits(path, folder, char_edits=None, name_edits=None, make_backup=True):
+    """Apply edits to one save folder's gamedata on a memcard, in place. Recomputes the
+    checksums + per-page ECC. Backs up the whole card first by default."""
+    card = load_card(path)
+    target = None
+    for e in card.root_entries():
+        if e["is_dir"] and e["name"] == folder:
+            target = e; break
+    if target is None:
+        return {"error": f"save folder {folder} not found"}
+    gd = card.read_file(target["cluster"], target["length"], folder)
+    if gd is None:
+        return {"error": "gamedata not found"}
+    new_gd, changed = apply_edits_to_gamedata(gd, char_edits, name_edits)
+    if changed == 0:
+        return {"ok": True, "changed": 0, "note": "no editable fields in request"}
+    if make_backup:
+        bak = path + ".bak"
+        if not os.path.exists(bak):
+            shutil.copy2(path, bak)
+    clusters = card.write_file(target["cluster"], target["length"], folder, new_gd)
+    with open(path, "wb") as f:
+        f.write(card.to_bytes())
+    return {"ok": True, "changed": changed, "clustersWritten": clusters,
+            "crc": struct.unpack_from("<I", new_gd, CRC_OFF)[0]}
 
 
 def read_all_s4_saves(path):
@@ -220,6 +400,8 @@ def read_all_s4_saves(path):
         dec = decode_save(gd)
         dec["folder"] = s["folder"]
         dec["label"] = slot_label(s["folder"])
+        for nm in dec["names"]:
+            nm["folder"] = s["folder"]
         ic = card.read_file(s["cluster"], s["length"], "icon.sys")
         dec["meta"] = _title_from_icon_sys(ic)
         saves.append(dec)

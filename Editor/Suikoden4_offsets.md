@@ -89,8 +89,22 @@ Header (confirmed by hexdump + cross-save diff of 3 saves in the same playthroug
 | +0x00 | u32 | version = 6 | constant across all saves |
 | +0x04 | u32 | = 1 | constant |
 | +0x08 | u16 | slot number | 0/1/2 match folder s400/401/402 |
-| +0x0C | u32 | **CRC32** of body `0x20..end` | **CRACKED** — `zlib.crc32(gamedata[0x20:])` matches the first dword on all 5 saves. |
-| +0x10 | 16 bytes | **custom hash tail** | changes with content but is NOT plain MD5/SHA1[:16]/RIPEMD of any swept range or framing (CRC-salt, length-salt, field-zeroed). Almost certainly a bespoke EE routine — needs MIPS disassembly of `SLUS_209.79` to reproduce. **This is the remaining write gate.** |
+| +0x0C | u32 | **CRC32** of `gamedata[0x20:0x20+0xE240]` (little-endian) | **CRACKED** — verified on all saves. |
+| +0x10 | 16 bytes | **MD5** of `gamedata[0x20:0x20+0xE240]`, **byte-reversed** | **CRACKED** — the game stores the 16-byte MD5 digest in reverse byte order. Verified on all saves. |
+
+### Checksum, fully solved (write-enabled)
+Found by disassembling `SLUS_209.79` (MIPS64, PS2). The save serializer at vaddr
+`0x471C34` calls, over `base = gamedata+0x20`, `len = 0xE240` (57920 bytes):
+1. `0x4E1848` → CRC32 (standard reflected table at vaddr `0x583AB4`) → stored LE at `+0x0C`.
+2. `0x4E1890` → MD5 (init constants `67452301/EFCDAB89/98BADCFE/10325476` at `0x4E2CF0`) →
+   the 16-byte digest is written **reversed** to `+0x10`.
+
+```python
+import hashlib, zlib, struct
+body = gamedata[0x20:0x20+0xE240]
+struct.pack_into("<I", gd, 0x0C, zlib.crc32(body) & 0xFFFFFFFF)
+gd[0x10:0x20] = hashlib.md5(body).digest()[::-1]
+```
 | +0x28 | char[16?] | Hero name ("Sparda") | ASCII, null-padded |
 | +0x38 | char[] | 2nd name ("Sta"…) | |
 | +0x4A | char[] | Ship name ("Basel") | |
@@ -99,11 +113,9 @@ Header (confirmed by hexdump + cross-save diff of 3 saves in the same playthroug
 The save title (icon.sys, Shift-JIS full-width) parses as
 `Suikoden4 [NN] LVLnn / H:MM` — chapter, level, playtime.
 
-**Checksum status: PARTIALLY CRACKED.** The `0x0C` dword is a standard CRC32 of the body
-(`gamedata[0x20:]`) — solved and reproducible. The `0x10..0x1F` 16-byte tail is a custom
-hash that resists every standard algorithm/framing tried; reproducing it needs MIPS
-disassembly of the boot ELF's save routine. Until that tail is solved, writing a modified
-save risks a load failure, so the save side ships **read-only**. Never write the save blind.
+**Checksum status: FULLY CRACKED (write-enabled).** Both fields are reproducible (CRC32 +
+reversed MD5 over `0x20..0x20+0xE240`), verified against all sample saves. Save write-back
+recomputes them before committing, then refreshes each memcard page's Hamming ECC.
 
 Playtime appears mirrored as several incrementing u32 copies (+0x108, +0x2E8, +0x5B8,
 +0x720 all step by 112 between the 4:42 and 4:49 saves). Potch offset in the save is

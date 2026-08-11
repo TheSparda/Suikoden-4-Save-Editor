@@ -168,7 +168,21 @@ class Handler(BaseHTTPRequestHandler):
                 if not path or not os.path.isfile(path):
                     return self._send(200, {"error": "file not found"})
                 save_config(lastCardRoot=os.path.dirname(path))
-                return self._send(200, {"ok": True, "saves": SV.read_all_s4_saves(path)})
+                return self._send(200, {"ok": True, "path": path,
+                                        "saves": SV.read_all_s4_saves(path)})
+            if self.path == "/api/save-write":
+                path = b.get("path", "")
+                folder = b.get("folder", "")
+                if not path or not os.path.isfile(path):
+                    return self._send(200, {"error": "card file not found"})
+                # char_edits keys arrive as strings from JSON; coerce to int
+                ce = {int(k): v for k, v in (b.get("charEdits") or {}).items()}
+                res = SV.write_save_edits(path, folder, char_edits=ce,
+                                          name_edits=b.get("nameEdits") or {},
+                                          make_backup=b.get("backup", True))
+                if res.get("ok"):
+                    res["saves"] = SV.read_all_s4_saves(path)
+                return self._send(200, res)
             if self.path == "/api/iso-dump":
                 if not ISO_PATH:
                     return self._send(200, {"error": "no ISO loaded"})
@@ -310,14 +324,15 @@ async function hexfind(){$('#findout').textContent='searching…';
  const r=await api('/api/iso-find',{hex:$('#hfind').value});
  $('#findout').textContent=r.error?r.error:(r.hits.length+' hit(s): '+r.hits.join('  '));}
 
-// ---- Saves
-let saveInit=false;
+// ---- Saves (editable — checksum solved: CRC32 + reversed MD5 over 0x20..0x20+0xE240)
+let saveInit=false, cardPath=null;
 async function initSave(){saveInit=true;const s=$('#t-save');
  s.innerHTML=`<div class="card"><div class="row"><b>PS2 memory card</b>
-   <span class="badge ro">read-only</span><span class="sp"></span>
+   <span class="badge ok">editable</span><span class="sp"></span>
+   <label class="mut"><input type="checkbox" id="bak" checked> backup card before write</label>
    <button class="pri" onclick="pickCard()">Choose card…</button>
    <button onclick="scanCards()">Scan for cards</button></div>
-   <div class="note">Save editing is read-only: the gamedata checksum (20-byte digest at 0x0C) is an unsolved save-load gate. Writing could break the save. Viewing is safe.</div>
+   <div class="note">Edits recompute the save checksum (CRC32 + reversed MD5) and refresh memcard ECC — the save loads normally. A <code>.bak</code> of the whole card is made before the first write. Test on a copy first.</div>
    <div id="cardlist" class="mut"></div>
    <div id="saveout"></div></div>`;}
 async function pickCard(){const r=await api('/api/pick',{kind:'card'});if(r.path)readSave(r.path);}
@@ -325,18 +340,44 @@ async function scanCards(){$('#cardlist').textContent='scanning…';const r=awai
  if(!r.cards||!r.cards.length){$('#cardlist').textContent='no PS2 cards found nearby.';return;}
  $('#cardlist').innerHTML='<div class="row" style="margin:8px 0">'+r.cards.map(c=>
    `<button onclick="readSave('${esc(c.path)}')">${esc(c.name)} ${c.hasS4?'<span class=\"badge ok\">S4</span>':''} <span class="mut">${c.mb}MB</span></button>`).join('')+'</div>';}
+function renderSaves(saves){
+ $('#saveout').innerHTML=saves.map(sv=>{
+  const cksum=sv.checksumValid?'<span class="badge ok">checksum ok</span>':'<span class="badge ro">checksum off</span>';
+  const nameRows=sv.names.map(n=>`<tr><td class="mut">${esc(n.label)}</td>
+    <td><input type="text" class="mono" data-name="${esc(n.folder)}|${esc(n.key)}" value="${esc(n.value)}" maxlength="${n.max}" size="18"></td></tr>`).join('');
+  const chars=(sv.characters||[]).map(c=>{
+    const st=c.stats;
+    const cell=(f,v,mx)=>`<input type="number" min="0" max="${mx}" value="${v}" style="width:70px" data-ch="${esc(sv.folder)}|${c.rosterIndex}|${f}">`;
+    return `<tr><td>${esc(c.name)}</td>
+      <td>${cell('curHP',c.curHP,9999)}</td><td>${cell('maxHP',c.maxHP,9999)}</td>
+      ${['STR','SKL','MAG','EVA','PDF','MDF','SPD','LUK'].map(k=>`<td>${cell('stat:'+k,st[k],999)}</td>`).join('')}</tr>`;}).join('');
+  return `<div class="card"><div class="row"><b>${esc(sv.label)}</b>
+    <span class="mono mut">${esc(sv.folder)}</span>${cksum}<span class="sp"></span>
+    <span class="mono mut">${esc(sv.meta&&sv.meta.title||'')}</span>
+    <button class="pri" onclick="writeSave('${esc(sv.folder)}')">Write ${esc(sv.label)}</button></div>
+    <table><tbody>${nameRows}</tbody></table>
+    <div class="scroll" style="margin-top:10px"><table><thead><tr><th>Character</th><th>Cur HP</th><th>Max HP</th>
+     <th>STR</th><th>SKL</th><th>MAG</th><th>EVA</th><th>PDF</th><th>MDF</th><th>SPD</th><th>LUK</th></tr></thead>
+     <tbody>${chars}</tbody></table></div></div>`;}).join('');}
 async function readSave(path){$('#saveout').innerHTML='<p class="mut">reading…</p>';
  const r=await api('/api/read-save',{path});
  if(r.error)return $('#saveout').innerHTML='<p style="color:var(--bad)">'+esc(r.error)+'</p>';
  if(!r.saves.length)return $('#saveout').innerHTML='<p class="mut">no Suikoden IV saves on this card.</p>';
- $('#saveout').innerHTML=r.saves.map(sv=>`<div class="card"><div class="row"><b>${esc(sv.label)}</b>
-   <span class="mono mut">${esc(sv.folder)}</span><span class="sp"></span>
-   <span class="mono mut">${esc(sv.meta&&sv.meta.title||'')}</span></div>
-   <table><tbody>
-   <tr><td class="mut">Version</td><td class="mono">${sv.version}</td></tr>
-   <tr><td class="mut">Checksum digest</td><td class="mono">${esc(sv.digest)}</td></tr>
-   ${sv.names.map(n=>`<tr><td class="mut">${esc(n.label)}</td><td class="mono">${esc(n.value)}</td></tr>`).join('')}
-   </tbody></table></div>`).join('');}
+ cardPath=r.path;renderSaves(r.saves);}
+async function writeSave(folder){
+ if(!cardPath)return;
+ const charEdits={}, nameEdits={};
+ for(const el of document.querySelectorAll(`[data-ch^="${folder}|"]`)){
+   const [,ridx,field]=el.dataset.ch.split('|');
+   charEdits[ridx]=charEdits[ridx]||{};
+   if(field.startsWith('stat:')){charEdits[ridx].stats=charEdits[ridx].stats||{};charEdits[ridx].stats[field.slice(5)]=+el.value;}
+   else charEdits[ridx][field]=+el.value;}
+ for(const el of document.querySelectorAll(`[data-name^="${folder}|"]`)){
+   const key=el.dataset.name.split('|')[1];nameEdits[key]=el.value;}
+ const r=await api('/api/save-write',{path:cardPath,folder,charEdits,nameEdits,backup:$('#bak').checked});
+ if(r.error)return alert('Write failed: '+r.error);
+ alert(`Wrote ${folder}: ${r.changed} field(s) changed. Checksum recomputed.`);
+ if(r.saves)renderSaves(r.saves);}
 
 // ---- Reference
 let refLoaded=false,refData=null;

@@ -18,26 +18,32 @@ Python 3.8+ and a modern browser. macOS / Windows / Linux.
 
 Then open the printed `http://127.0.0.1:8749`.
 
-## What works today (v1)
+## What works today
+- **Saves tab — editable.** Opens a PS2 memory card (`.ps2/.mcd/.mc2/.bin`), finds
+  Suikoden IV saves (`BASLUS-20979…`), and edits every recruited character's HP and
+  eight stats (STR/SKL/MAG/EVA/PDF/MDF/SPD/LUK) plus the hero/ship names. On write it
+  recomputes the save checksum and refreshes memcard ECC, so the save loads normally.
+  A `.bak` of the whole card is made before the first write.
 - **ISO tab** — verifies the disc (serial SLUS-209.79), shows the ISO9660 file map
   (`SLUS_209.79`, `FILEDATA.BIN/BI1/BI2`, `STR.BIN`, …), and a hex explorer + byte
-  search for locating tables.
-- **Saves tab** — opens a PS2 memory card (`.ps2/.mcd/.mc2/.bin`), finds Suikoden IV
-  saves (`BASLUS-20979…`), and displays each save's header, hero/ship names, and the
-  parsed save title (chapter / level / playtime). **Read-only.**
-- **Reference tab** — browsable database extracted from the community Cheat Engine
-  table: 113 characters, 519 items, 42 runes, and the full character record layout.
+  search.
+- **Reference tab** — browsable database from the community Cheat Engine table:
+  113 characters, 519 items, 42 runes, and the full character record layout.
+
+### The save checksum (solved)
+The gamedata payload is gated by a 20-byte digest at `0x0C`. It was reverse-engineered
+from `SLUS_209.79` (MIPS disassembly): over `body = gamedata[0x20 : 0x20+0xE240]`,
+`+0x0C` is `CRC32(body)` and `+0x10` is `MD5(body)` stored **byte-reversed**. Verified
+against every sample save; write-back reproduces both exactly. See
+`Editor/Suikoden4_offsets.md`.
 
 ## What's deferred (and why)
-This project follows the S3 editor's rule: expose only what's verified.
-- **Save writing is off.** The gamedata payload carries a 20-byte digest at offset
-  `0x0C` that gates save loading (same class of problem as S3's checksum). It isn't a
-  plain SHA1/MD5 of any obvious range — it's salted/custom. Until it's cracked, a
-  modified save could fail to load, so writing stays disabled.
-- **New-game ISO stat editing is off.** The in-RAM record *shape* is fully known
-  (stride `0x78`; STR/SKL/MAG/… at `+0x20…`), but the initial-stats copy that seeds a
-  new game lives packed inside `FILEDATA.*` and hasn't been located yet. The hex
-  explorer exists to help find it.
+- **New-game ISO stat editing is off.** The in-RAM/save record *shape* is fully known
+  (stride `0x78`; stats at `+0x20…`), but the initial-stats copy that seeds a new game
+  lives packed inside `FILEDATA.*` and hasn't been located yet. The hex explorer exists
+  to help find it.
+- **Equipment/rune editing in saves is off.** The stat block is confirmed; the parallel
+  equipment block's offset within the save isn't verified yet, so it's not written blind.
 
 See `Editor/Suikoden4_offsets.md` for the full reverse-engineering notes.
 
