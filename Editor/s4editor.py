@@ -235,7 +235,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
 <title>Suikoden IV ISO &amp; Save Editor</title>
 <style>
 :root{--bg:#0f1116;--panel:#181b22;--panel2:#1f232c;--fg:#e6e9ef;--mut:#98a2b3;
- --acc:#5b8cff;--line:#2a2f3a;--warn:#f0b429;--ok:#38b26b;--bad:#e5484d;}
+ --acc:#5b8cff;--acc2:#7ee0c0;--line:#2a2f3a;--warn:#f0b429;--ok:#38b26b;--bad:#e5484d;}
 [data-theme=light]{--bg:#f4f6fb;--panel:#fff;--panel2:#eef1f7;--fg:#1a1d24;
  --mut:#5a6474;--acc:#2f6df0;--line:#dde2ec;--warn:#a05a00;--ok:#188a4e;--bad:#c62a2f;}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);
@@ -269,18 +269,30 @@ select option{background:var(--panel2);color:var(--fg)}
 input:focus,select:focus{outline:none;border-color:var(--acc)}
 .scroll{max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:8px}
 .scroll th{top:0}
-/* per-character editor blocks */
-.chargrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-top:10px}
-.charcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel2)}
-.charcard h4{margin:0 0 8px;font-size:14px;display:flex;justify-content:space-between;align-items:baseline}
-.charcard h4 .lvl{color:var(--mut);font-weight:400;font-size:12px}
-.statrow{display:grid;grid-template-columns:repeat(5,1fr);gap:6px 8px}
-.fld{display:flex;flex-direction:column;gap:2px}
-.fld label{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.03em}
-.runerow{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 8px;margin-top:8px;
- padding-top:8px;border-top:1px solid var(--line)}
-.gearrow{display:grid;grid-template-columns:repeat(4,1fr);gap:6px 8px;margin-top:8px;
- padding-top:8px;border-top:1px solid var(--line)}
+/* per-character editor blocks (S3-editor style) */
+.subtabs{display:flex;gap:6px;margin-bottom:10px}
+.subtabs button{background:transparent;color:var(--mut);border:1px solid var(--line);
+ border-radius:8px;padding:6px 12px;cursor:pointer}
+.subtabs button.on{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600}
+.charcard{border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+ background:var(--panel2);margin:0 0 12px}
+.charhead{font-weight:600;font-size:15px;color:var(--acc2);margin-bottom:8px;
+ display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.charhead .lvl{color:var(--mut);font-weight:400;font-size:12px}
+.tablewrap{overflow-x:auto}
+.savetbl{width:auto;min-width:100%;border-collapse:collapse}
+.savetbl th{position:static;background:none;text-align:center;font-size:11px;
+ text-transform:uppercase;letter-spacing:.03em;padding:2px 6px;border:0}
+.savetbl td{padding:2px 6px;border:0}
+.savetbl input[type=number]{width:62px;text-align:center}
+.seclabel{color:var(--acc2);font-size:12px;font-weight:600;margin:12px 2px 4px}
+.grid{display:grid;gap:6px 10px}
+.grid.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.grid.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:720px){.grid.g4,.grid.g3{grid-template-columns:repeat(2,1fr)}}
+.fld{display:flex;flex-direction:column;gap:3px}
+.fld label{font-size:11px;color:var(--mut)}
+.chars{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px;margin-top:10px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:800px){.grid2{grid-template-columns:1fr}}
 .hexline{display:grid;grid-template-columns:90px 1fr 150px;gap:12px;font-family:ui-monospace,monospace;font-size:12px;padding:1px 8px}
@@ -383,38 +395,57 @@ function renderSaves(saves){
   const cksum=sv.checksumValid?'<span class="badge ok">checksum ok</span>':'<span class="badge ro">checksum off</span>';
   const nameRows=sv.names.map(n=>`<tr><td class="mut">${esc(n.label)}</td>
     <td><input type="text" class="mono" data-name="${esc(n.folder)}|${esc(n.key)}" value="${esc(n.value)}" maxlength="${n.max}" size="18"></td></tr>`).join('');
-  const chars=(sv.characters||[]).map(c=>{
+  const GEAR_LABELS={head:'Head',body:'Body',hands:'Hands',feet:'Feet',acc1:'Accessory 1',acc2:'Accessory 2',acc3:'Accessory 3'};
+  const STATS=['STR','SKL','MAG','EVA','PDF','MDF','SPD','LUK'];
+  const charCard=(c)=>{
     const st=c.stats, cid=esc(sv.folder)+'|'+c.rosterIndex;
-    const num=(lbl,f,v,mx)=>`<div class="fld"><label>${lbl}</label>`+
-      `<input type="number" min="0" max="${mx}" value="${v}" data-ch="${cid}|${f}"></div>`;
+    const cell=(f,v,mx)=>`<input type="number" min="0" max="${mx}" value="${v}" data-ch="${cid}|${f}">`;
+    const statTable=`<div class="tablewrap"><table class="savetbl"><thead><tr>`+
+      `<th>Max HP</th>${STATS.map(k=>`<th>${k}</th>`).join('')}</tr></thead><tbody><tr>`+
+      `<td>${cell('maxHP',c.maxHP,9999)}</td>`+
+      STATS.map(k=>`<td>${cell('stat:'+k,st[k],999)}</td>`).join('')+`</tr></tbody></table></div>`;
     const rune=(slot,label)=>{
       const cur=c.runes[slot];
-      const opts=RUNE_LIST.map(r=>
-        `<option value="${r.id}"${r.id===cur?' selected':''}>${esc(r.name)}</option>`).join('');
-      return `<div class="fld"><label>${label}</label>`+
-        `<select data-ch="${cid}|rune:${slot}">${opts}</select></div>`;};
+      const opts=RUNE_LIST.map(r=>`<option value="${r.id}"${r.id===cur?' selected':''}>${esc(r.name)}</option>`).join('');
+      return `<div class="fld"><label>${label}</label><select data-ch="${cid}|rune:${slot}">${opts}</select></div>`;};
     const gear=(key,label)=>{
       const cur=(c.equip||{})[key]||0;
-      // reuse the prebuilt option string, then mark the current item selected
       const opts=ITEM_OPTS.replace(`value="${cur}">`,`value="${cur}" selected>`);
-      return `<div class="fld"><label>${label}</label>`+
-        `<select data-ch="${cid}|equip:${key}">${opts}</select></div>`;};
-    const GEAR_LABELS={head:'Head',body:'Body',hands:'Hands',feet:'Feet',acc1:'Accessory 1',acc2:'Accessory 2',acc3:'Accessory 3'};
-    const gearrow=EQUIP_SLOTS.map(([k])=>gear(k,GEAR_LABELS[k]||k)).join('');
-    return `<div class="charcard"><h4>${esc(c.name)} <span class="lvl">#${c.rosterIndex}</span></h4>
-      <div class="statrow">
-        ${num('Max HP','maxHP',c.maxHP,9999)}
-        ${['STR','SKL','MAG','EVA','PDF','MDF','SPD','LUK'].map(k=>num(k,'stat:'+k,st[k],999)).join('')}
-      </div>
-      <div class="runerow">${rune(0,'Rune 1')}${rune(1,'Rune 2')}${rune(2,'Rune 3')}</div>
-      <div class="gearrow">${gearrow}</div>
-    </div>`;}).join('');
+      return `<div class="fld"><label>${label}</label><select data-ch="${cid}|equip:${key}">${opts}</select></div>`;};
+    return `<div class="charcard" data-name="${esc(c.name.toLowerCase())}" data-ri="${c.rosterIndex}" data-rec="${c.hasData?1:0}">
+      <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span>
+        ${c.hasData?'<span class="badge ok" style="font-size:11px">recruited</span>':'<span class="badge" style="font-size:11px">not recruited</span>'}</div>
+      ${statTable}
+      <div class="seclabel">Runes</div>
+      <div class="grid g3">${rune(0,'Rune 1')}${rune(1,'Rune 2')}${rune(2,'Rune 3')}</div>
+      <div class="seclabel">Equipment</div>
+      <div class="grid g4">${EQUIP_SLOTS.map(([k])=>gear(k,GEAR_LABELS[k]||k)).join('')}</div>
+    </div>`;};
+  const chars=(sv.characters||[]).map(charCard).join('');
+  const f=esc(sv.folder);
   return `<div class="card"><div class="row"><b>${esc(sv.label)}</b>
-    <span class="mono mut">${esc(sv.folder)}</span>${cksum}<span class="sp"></span>
+    <span class="mono mut">${f}</span>${cksum}<span class="sp"></span>
     <span class="mono mut">${esc(sv.meta&&sv.meta.title||'')}</span>
-    <button class="pri" onclick="writeSave('${esc(sv.folder)}')">Write ${esc(sv.label)}</button></div>
+    <button class="pri" onclick="writeSave('${f}')">Write ${esc(sv.label)}</button></div>
     <table><tbody>${nameRows}</tbody></table>
-    <div class="chargrid">${chars}</div></div>`;}).join('');}
+    <div class="row" style="margin-top:12px">
+      <input type="search" placeholder="filter characters…" oninput="filterChars('${f}',this.value)" style="width:240px">
+      <label class="mut"><input type="checkbox" checked onchange="reconlyChars('${f}',this.checked)"> recruited only</label>
+    </div>
+    <div id="chars-${f}" class="chars">${chars}</div></div>`;}).join('');
+ applyCharFilters();}
+// filter state per folder
+const CHARFILT={};
+function filterChars(folder,q){(CHARFILT[folder]=CHARFILT[folder]||{}).q=q.toLowerCase();applyCharFilters();}
+function reconlyChars(folder,on){(CHARFILT[folder]=CHARFILT[folder]||{}).rec=on;applyCharFilters();}
+function applyCharFilters(){
+ document.querySelectorAll('.chars').forEach(box=>{
+   const folder=box.id.slice('chars-'.length);
+   const st=CHARFILT[folder]||{}; const q=st.q||''; const rec=st.rec!==false;
+   box.querySelectorAll('.charcard').forEach(card=>{
+     const okQ=!q||card.dataset.name.includes(q)||card.dataset.ri===q;
+     const okR=!rec||card.dataset.rec==='1';
+     card.style.display=(okQ&&okR)?'':'none';});});}
 async function readSave(path){$('#saveout').innerHTML='<p class="mut">reading…</p>';
  const r=await api('/api/read-save',{path});
  if(r.error)return $('#saveout').innerHTML='<p style="color:var(--bad)">'+esc(r.error)+'</p>';
