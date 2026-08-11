@@ -78,13 +78,19 @@ CT_STRIDE   = 0x78       # the cheat-table offset unit; roster index = ct_offset
 # rune slots (3 per character), low byte of each u16 at the record start
 OFF_RUNES   = (0x00, 0x02, 0x04)
 RUNE_SLOTS  = 3
-# stat sub-block, offsets RELATIVE TO THE RECORD BASE (add 0x74 to reach the stat area)
-STAT_BASE   = 0x74
-OFF_EXP     = STAT_BASE + 0x00   # u16 experience toward next
-OFF_CURHP   = STAT_BASE + 0x0A   # u16 current HP (reads 0 when saved out of battle)
-OFF_MAXHP   = STAT_BASE + 0x1E   # u16 max HP
-OFF_STATS   = STAT_BASE + 0x20   # u16[8]: STR SKL MAG EVA PDF MDF SPD LUK
+# stat sub-block, offsets RELATIVE TO THE RECORD BASE. Max HP (+0x92) and the 8 stats
+# (+0x94..) are confirmed against known values across two playthroughs.
+OFF_MAXHP   = 0x92              # u16 max HP
+OFF_STATS   = 0x94              # u16[8]: STR SKL MAG EVA PDF MDF SPD LUK
 STAT_NAMES  = ["STR", "SKL", "MAG", "EVA", "PDF", "MDF", "SPD", "LUK"]
+# NOT exposed, and why:
+#  * Current HP is not persisted in the record — the game restores it to Max HP on load,
+#    so every saved value reads 0. There is nothing meaningful to edit.
+#  * Level is DERIVED from experience (Suikoden computes it), so there is no level byte to
+#    set; changing a character's level means changing their EXP.
+#  * The EXP field within the save has not been confirmed to the standard this tool holds
+#    (candidates don't track level cleanly across two playthroughs), so it is left alone
+#    rather than exposed as a guess that could corrupt a save.
 # Equipment slots (u16 item ids), offsets RELATIVE TO THE RECORD BASE. Verified by category
 # purity: across all recruited characters in two independent playthroughs, +0xBE holds only
 # armor/robes and +0xC2 only boots/shoes (100% pure); head/hands/accessory slots likewise
@@ -335,8 +341,6 @@ def decode_character(gamedata, roster_index):
         "rosterIndex": roster_index,
         "name": CHAR_NAMES.get(roster_index, f"#{roster_index}"),
         "addr": off,
-        "exp": struct.unpack_from("<H", gamedata, off + OFF_EXP)[0],
-        "curHP": struct.unpack_from("<H", gamedata, off + OFF_CURHP)[0],
         "maxHP": maxhp,
         "stats": dict(zip(STAT_NAMES, stats)),
         "runes": runes,
@@ -375,7 +379,7 @@ def decode_save(gamedata):
 
 
 # --- editing --------------------------------------------------------------------
-CHAR_FIELDS = {"curHP": (OFF_CURHP, 2), "maxHP": (OFF_MAXHP, 2), "exp": (OFF_EXP, 2)}
+CHAR_FIELDS = {"maxHP": (OFF_MAXHP, 2)}
 STAT_INDEX = {n: i for i, n in enumerate(STAT_NAMES)}
 
 def _clamp(v, width):

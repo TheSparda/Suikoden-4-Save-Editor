@@ -403,7 +403,7 @@ function renderSaves(saves){
     const gearrow=EQUIP_SLOTS.map(([k])=>gear(k,GEAR_LABELS[k]||k)).join('');
     return `<div class="charcard"><h4>${esc(c.name)} <span class="lvl">#${c.rosterIndex}</span></h4>
       <div class="statrow">
-        ${num('Cur HP','curHP',c.curHP,9999)}${num('Max HP','maxHP',c.maxHP,9999)}
+        ${num('Max HP','maxHP',c.maxHP,9999)}
         ${['STR','SKL','MAG','EVA','PDF','MDF','SPD','LUK'].map(k=>num(k,'stat:'+k,st[k],999)).join('')}
       </div>
       <div class="runerow">${rune(0,'Rune 1')}${rune(1,'Rune 2')}${rune(2,'Rune 3')}</div>
