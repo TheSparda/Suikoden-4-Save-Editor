@@ -144,8 +144,18 @@ class Handler(BaseHTTPRequestHandler):
                 })
             if p == "/api/cards":
                 cfg = load_config()
-                roots = [_scan_root, os.path.expanduser("~"), cfg.get("lastCardRoot", "")]
-                return self._send(200, {"cards": SV.scan_memcards([r for r in roots if r])})
+                here = os.path.dirname(os.path.abspath(__file__))
+                # Bounded root set (like the S3 editor) — never walk all of $HOME, which
+                # hangs on large trees. Search the project dir, its parent, any nearby
+                # Saves folders, and wherever the last card was opened.
+                roots = {_scan_root,
+                         os.path.abspath(os.path.join(_scan_root, "..")),
+                         os.path.abspath(os.path.join(_scan_root, "Saves")),
+                         os.path.abspath(os.path.join(here, "..")),
+                         os.path.abspath(os.path.join(here, "..", "Saves")),
+                         cfg.get("lastCardRoot", "")}
+                return self._send(200, {"lastCard": cfg.get("lastCard"),
+                                        "cards": SV.scan_memcards(sorted(r for r in roots if r))})
             return self._send(404, {"error": "not found"})
         except Exception as e:
             return self._send(500, {"error": str(e)})
@@ -244,9 +254,12 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
 th{color:var(--mut);font-weight:600;position:sticky;top:52px;background:var(--panel)}
 code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-input[type=text],input[type=search]{background:var(--panel2);border:1px solid var(--line);
- border-radius:8px;padding:7px 10px}
+input[type=text],input[type=search],input[type=number]{background:var(--panel2);
+ color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+input[type=number]{width:70px;padding:5px 6px;text-align:right}
+input:focus{outline:none;border-color:var(--acc)}
 .scroll{max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.scroll th{top:0}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:800px){.grid2{grid-template-columns:1fr}}
 .hexline{display:grid;grid-template-columns:90px 1fr 150px;gap:12px;font-family:ui-monospace,monospace;font-size:12px;padding:1px 8px}
