@@ -1,0 +1,13 @@
+# Game data — never commit copyrighted disc images or personal saves
+Base ISO/
+Saves/
+*.iso
+*.ps2
+*.mcd
+*.mc2
+*.bin
+# The source cheat table is fine to keep; personal memcards are not
+__pycache__/
+*.pyc
+.s4editor.json
+.DS_Store
