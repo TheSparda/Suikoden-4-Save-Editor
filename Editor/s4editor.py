@@ -182,7 +182,10 @@ class Handler(BaseHTTPRequestHandler):
                 # character record (the JSON keys are hex strings like "0B").
                 runes = sorted(({"id": int(k, 16), "name": v}
                                 for k, v in P.RUNE_NAMES.items()), key=lambda r: r["id"])
+                items = sorted(({"id": k, "name": v}
+                                for k, v in SV.ITEM_NAMES.items()), key=lambda r: r["id"])
                 return self._send(200, {"ok": True, "path": path, "runes": runes,
+                                        "items": items, "equipSlots": SV.EQUIP_SLOTS,
                                         "saves": SV.read_all_s4_saves(path)})
             if self.path == "/api/save-write":
                 path = b.get("path", "")
@@ -275,6 +278,8 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .fld{display:flex;flex-direction:column;gap:2px}
 .fld label{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.03em}
 .runerow{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 8px;margin-top:8px;
+ padding-top:8px;border-top:1px solid var(--line)}
+.gearrow{display:grid;grid-template-columns:repeat(4,1fr);gap:6px 8px;margin-top:8px;
  padding-top:8px;border-top:1px solid var(--line)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:800px){.grid2{grid-template-columns:1fr}}
@@ -370,6 +375,9 @@ async function scanCards(){$('#cardlist').textContent='scanning…';const r=awai
  $('#cardlist').innerHTML='<div class="row" style="margin:8px 0">'+r.cards.map(c=>
    `<button onclick="readSave('${esc(c.path)}')">${esc(c.name)} ${c.hasS4?'<span class=\"badge ok\">S4</span>':''} <span class="mut">${c.mb}MB</span></button>`).join('')+'</div>';}
 let RUNE_LIST=[];   // [{id:int,name}] for rune dropdowns, built on read
+let ITEM_LIST=[];   // [{id:int,name}] for equipment dropdowns
+let ITEM_OPTS='';   // prebuilt <option> string (519 items) reused per slot
+let EQUIP_SLOTS=[]; // [[key,offset],...] slot order from the server
 function renderSaves(saves){
  $('#saveout').innerHTML=saves.map(sv=>{
   const cksum=sv.checksumValid?'<span class="badge ok">checksum ok</span>':'<span class="badge ro">checksum off</span>';
@@ -385,12 +393,21 @@ function renderSaves(saves){
         `<option value="${r.id}"${r.id===cur?' selected':''}>${esc(r.name)}</option>`).join('');
       return `<div class="fld"><label>${label}</label>`+
         `<select data-ch="${cid}|rune:${slot}">${opts}</select></div>`;};
+    const gear=(key,label)=>{
+      const cur=(c.equip||{})[key]||0;
+      // reuse the prebuilt option string, then mark the current item selected
+      const opts=ITEM_OPTS.replace(`value="${cur}">`,`value="${cur}" selected>`);
+      return `<div class="fld"><label>${label}</label>`+
+        `<select data-ch="${cid}|equip:${key}">${opts}</select></div>`;};
+    const GEAR_LABELS={head:'Head',body:'Body',hands:'Hands',feet:'Feet',acc1:'Accessory 1',acc2:'Accessory 2',acc3:'Accessory 3'};
+    const gearrow=EQUIP_SLOTS.map(([k])=>gear(k,GEAR_LABELS[k]||k)).join('');
     return `<div class="charcard"><h4>${esc(c.name)} <span class="lvl">#${c.rosterIndex}</span></h4>
       <div class="statrow">
         ${num('Cur HP','curHP',c.curHP,9999)}${num('Max HP','maxHP',c.maxHP,9999)}
         ${['STR','SKL','MAG','EVA','PDF','MDF','SPD','LUK'].map(k=>num(k,'stat:'+k,st[k],999)).join('')}
       </div>
       <div class="runerow">${rune(0,'Rune 1')}${rune(1,'Rune 2')}${rune(2,'Rune 3')}</div>
+      <div class="gearrow">${gearrow}</div>
     </div>`;}).join('');
   return `<div class="card"><div class="row"><b>${esc(sv.label)}</b>
     <span class="mono mut">${esc(sv.folder)}</span>${cksum}<span class="sp"></span>
@@ -403,6 +420,8 @@ async function readSave(path){$('#saveout').innerHTML='<p class="mut">reading…
  if(r.error)return $('#saveout').innerHTML='<p style="color:var(--bad)">'+esc(r.error)+'</p>';
  if(!r.saves.length)return $('#saveout').innerHTML='<p class="mut">no Suikoden IV saves on this card.</p>';
  RUNE_LIST=r.runes||[];
+ ITEM_LIST=r.items||[]; EQUIP_SLOTS=r.equipSlots||[];
+ ITEM_OPTS=ITEM_LIST.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
  cardPath=r.path;renderSaves(r.saves);}
 async function writeSave(folder){
  if(!cardPath)return;
@@ -412,6 +431,7 @@ async function writeSave(folder){
    charEdits[ridx]=charEdits[ridx]||{};
    if(field.startsWith('stat:')){charEdits[ridx].stats=charEdits[ridx].stats||{};charEdits[ridx].stats[field.slice(5)]=+el.value;}
    else if(field.startsWith('rune:')){charEdits[ridx].runes=charEdits[ridx].runes||{};charEdits[ridx].runes[field.slice(5)]=+el.value;}
+   else if(field.startsWith('equip:')){charEdits[ridx].equip=charEdits[ridx].equip||{};charEdits[ridx].equip[field.slice(6)]=+el.value;}
    else charEdits[ridx][field]=+el.value;}
  for(const el of document.querySelectorAll(`[data-name^="${folder}|"]`)){
    const key=el.dataset.name.split('|')[1];nameEdits[key]=el.value;}

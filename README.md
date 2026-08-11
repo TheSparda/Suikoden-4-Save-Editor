@@ -21,8 +21,8 @@ Then open the printed `http://127.0.0.1:8749`.
 ## What works today
 - **Saves tab — editable.** Opens a PS2 memory card (`.ps2/.mcd/.mc2/.bin`), finds
   Suikoden IV saves (`BASLUS-20979…`), and edits every recruited character's HP,
-  eight stats (STR/SKL/MAG/EVA/PDF/MDF/SPD/LUK), and all three rune slots, plus the
-  hero/ship names. On write it
+  eight stats (STR/SKL/MAG/EVA/PDF/MDF/SPD/LUK), all three rune slots, and all seven equipment slots (head/body/hands/feet
+  + 3 accessories), plus the hero/ship names. On write it
   recomputes the save checksum and refreshes memcard ECC, so the save loads normally.
   A `.bak` of the whole card is made before the first write.
 - **ISO tab** — verifies the disc (serial SLUS-209.79), shows the ISO9660 file map

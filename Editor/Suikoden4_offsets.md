@@ -111,10 +111,24 @@ Within each record (offsets relative to record base at `0x1E4 + index*0xF0`):
 | +0x74+0x1E | u16 | Max HP |
 | +0x74+0x20 | u16[8] | STR SKL MAG EVA PDF MDF SPD LUK |
 
-Equipment slots also live in the record (past the stat block) but their exact offsets are not
-yet pinned — that region interleaves gear with level-scaled growth data and is easy to
-misread, so equipment editing waits for a controlled before/after save. Runes + stats + HP
-are verified and write-enabled.
+Equipment block (7 u16 slots, offsets relative to record base):
+| Offset | Slot |
+|---|---|
+| +0xBC | Head |
+| +0xBE | Body |
+| +0xC0 | Hands |
+| +0xC2 | Feet |
+| +0xC4 | Accessory 1 |
+| +0xC6 | Accessory 2 |
+| +0xC8 | Accessory 3 |
+
+Located and slot-ordered **by category purity**, no controlled save needed: diffing units
+recruited in one playthrough but not the other showed this region is all-zero for unrecruited
+units and fills with wearables once recruited. Tallying item categories per slot across all
+recruited characters in two playthroughs, +0xBE holds only armor/robes and +0xC2 only
+boots/shoes (100% pure); head/hands/accessory slots hold only their category once garbage
+(unrecruited) records are excluded. +0xCA is always empty, so the block is exactly 7 slots.
+Runes + stats + HP + equipment are all verified and write-enabled.
 
 ### Checksum, fully solved (write-enabled)
 Found by disassembling `SLUS_209.79` (MIPS64, PS2). The save serializer at vaddr

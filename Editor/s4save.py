@@ -85,10 +85,16 @@ OFF_CURHP   = STAT_BASE + 0x0A   # u16 current HP (reads 0 when saved out of bat
 OFF_MAXHP   = STAT_BASE + 0x1E   # u16 max HP
 OFF_STATS   = STAT_BASE + 0x20   # u16[8]: STR SKL MAG EVA PDF MDF SPD LUK
 STAT_NAMES  = ["STR", "SKL", "MAG", "EVA", "PDF", "MDF", "SPD", "LUK"]
-# Equipment slots exist within the record but their exact offsets are NOT yet verified
-# (the region past the stat block holds equipment + level-scaled growth data that is easy
-# to misread). Equipment editing stays deferred until a controlled before/after save pins
-# the slots; runes + stats + HP are proven and editable.
+# Equipment slots (u16 item ids), offsets RELATIVE TO THE RECORD BASE. Verified by category
+# purity: across all recruited characters in two independent playthroughs, +0xBE holds only
+# armor/robes and +0xC2 only boots/shoes (100% pure); head/hands/accessory slots likewise
+# hold only their category once unrecruited (garbage) records are excluded. The block is
+# exactly 7 slots — +0xCA is always empty.
+EQUIP_SLOTS = [
+    ("head", 0xBC), ("body", 0xBE), ("hands", 0xC0), ("feet", 0xC2),
+    ("acc1", 0xC4), ("acc2", 0xC6), ("acc3", 0xC8),
+]
+EQUIP_OFF = dict(EQUIP_SLOTS)
 
 def _char_names():
     """rosterIndex -> name, from s4_char_offsets.json (offset/0x78)."""
@@ -110,6 +116,16 @@ def _rune_names():
     except Exception:
         return {}
 RUNE_NAMES = _rune_names()
+
+def _item_names():
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        import json
+        raw = json.load(open(os.path.join(here, "s4_item_names.json")))
+        return {int(k, 16): v for k, v in raw.items()}
+    except Exception:
+        return {}
+ITEM_NAMES = _item_names()
 
 
 def recompute_checksums(gamedata):
@@ -313,6 +329,8 @@ def decode_character(gamedata, roster_index):
     stats = list(struct.unpack_from("<8H", gamedata, off + OFF_STATS))
     maxhp = struct.unpack_from("<H", gamedata, off + OFF_MAXHP)[0]
     runes = [gamedata[off + ro] for ro in OFF_RUNES]   # low byte of each rune slot
+    equip = {name: struct.unpack_from("<H", gamedata, off + eo)[0]
+             for name, eo in EQUIP_SLOTS}
     return {
         "rosterIndex": roster_index,
         "name": CHAR_NAMES.get(roster_index, f"#{roster_index}"),
@@ -323,6 +341,8 @@ def decode_character(gamedata, roster_index):
         "stats": dict(zip(STAT_NAMES, stats)),
         "runes": runes,
         "runeNames": [RUNE_NAMES.get(r, "") for r in runes],
+        "equip": equip,
+        "equipNames": {k: ITEM_NAMES.get(v, "") for k, v in equip.items()},
         "hasData": maxhp > 0 or sum(stats) > 0 or any(runes),
     }
 
@@ -391,6 +411,12 @@ def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None):
                     slot = int(slot)
                     if 0 <= slot < RUNE_SLOTS:
                         b[base + OFF_RUNES[slot]] = _clamp(rid, 1); changed += 1
+            elif k == "equip":
+                # {slotName: item_id (u16)}; 0 = empty slot.
+                for sname, iid in (v or {}).items():
+                    if sname in EQUIP_OFF:
+                        struct.pack_into("<H", b, base + EQUIP_OFF[sname], _clamp(iid, 2))
+                        changed += 1
             elif k in CHAR_FIELDS:
                 off, w = CHAR_FIELDS[k]
                 struct.pack_into({1:"<B",2:"<H",4:"<I"}[w], b, base + off, _clamp(v, w))
