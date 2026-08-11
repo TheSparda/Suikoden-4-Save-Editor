@@ -255,12 +255,24 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
 th{color:var(--mut);font-weight:600;position:sticky;top:52px;background:var(--panel)}
 code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-input[type=text],input[type=search],input[type=number]{background:var(--panel2);
+input[type=text],input[type=search],input[type=number],select{background:var(--panel2);
  color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
-input[type=number]{width:70px;padding:5px 6px;text-align:right}
-input:focus{outline:none;border-color:var(--acc)}
+input[type=number]{width:100%;padding:5px 6px;text-align:right}
+select{width:100%;padding:5px 8px;cursor:pointer}
+select option{background:var(--panel2);color:var(--fg)}
+input:focus,select:focus{outline:none;border-color:var(--acc)}
 .scroll{max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:8px}
 .scroll th{top:0}
+/* per-character editor blocks */
+.chargrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-top:10px}
+.charcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel2)}
+.charcard h4{margin:0 0 8px;font-size:14px;display:flex;justify-content:space-between;align-items:baseline}
+.charcard h4 .lvl{color:var(--mut);font-weight:400;font-size:12px}
+.statrow{display:grid;grid-template-columns:repeat(5,1fr);gap:6px 8px}
+.fld{display:flex;flex-direction:column;gap:2px}
+.fld label{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.03em}
+.runerow{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 8px;margin-top:8px;
+ padding-top:8px;border-top:1px solid var(--line)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:800px){.grid2{grid-template-columns:1fr}}
 .hexline{display:grid;grid-template-columns:90px 1fr 150px;gap:12px;font-family:ui-monospace,monospace;font-size:12px;padding:1px 8px}
@@ -361,23 +373,26 @@ function renderSaves(saves){
   const nameRows=sv.names.map(n=>`<tr><td class="mut">${esc(n.label)}</td>
     <td><input type="text" class="mono" data-name="${esc(n.folder)}|${esc(n.key)}" value="${esc(n.value)}" maxlength="${n.max}" size="18"></td></tr>`).join('');
   const chars=(sv.characters||[]).map(c=>{
-    const st=c.stats;
-    const cell=(f,v,mx)=>`<input type="number" min="0" max="${mx}" value="${v}" data-ch="${esc(sv.folder)}|${c.rosterIndex}|${f}">`;
-    const rune=(slot)=>`<select data-ch="${esc(sv.folder)}|${c.rosterIndex}|rune:${slot}">${RUNE_OPTS}</select>`.replace(
-      `value="${c.runes[slot]}"`,`value="${c.runes[slot]}" selected`);
-    return `<tr><td>${esc(c.name)}</td>
-      <td>${cell('curHP',c.curHP,9999)}</td><td>${cell('maxHP',c.maxHP,9999)}</td>
-      ${['STR','SKL','MAG','EVA','PDF','MDF','SPD','LUK'].map(k=>`<td>${cell('stat:'+k,st[k],999)}</td>`).join('')}
-      <td>${rune(0)}</td><td>${rune(1)}</td><td>${rune(2)}</td></tr>`;}).join('');
+    const st=c.stats, cid=esc(sv.folder)+'|'+c.rosterIndex;
+    const num=(lbl,f,v,mx)=>`<div class="fld"><label>${lbl}</label>`+
+      `<input type="number" min="0" max="${mx}" value="${v}" data-ch="${cid}|${f}"></div>`;
+    const rune=(slot,label)=>{
+      const opts=RUNE_OPTS.replace(`value="${c.runes[slot]}"`,`value="${c.runes[slot]}" selected`);
+      return `<div class="fld"><label>${label}</label>`+
+        `<select data-ch="${cid}|rune:${slot}">${opts}</select></div>`;};
+    return `<div class="charcard"><h4>${esc(c.name)} <span class="lvl">#${c.rosterIndex}</span></h4>
+      <div class="statrow">
+        ${num('Cur HP','curHP',c.curHP,9999)}${num('Max HP','maxHP',c.maxHP,9999)}
+        ${['STR','SKL','MAG','EVA','PDF','MDF','SPD','LUK'].map(k=>num(k,'stat:'+k,st[k],999)).join('')}
+      </div>
+      <div class="runerow">${rune(0,'Rune 1')}${rune(1,'Rune 2')}${rune(2,'Rune 3')}</div>
+    </div>`;}).join('');
   return `<div class="card"><div class="row"><b>${esc(sv.label)}</b>
     <span class="mono mut">${esc(sv.folder)}</span>${cksum}<span class="sp"></span>
     <span class="mono mut">${esc(sv.meta&&sv.meta.title||'')}</span>
     <button class="pri" onclick="writeSave('${esc(sv.folder)}')">Write ${esc(sv.label)}</button></div>
     <table><tbody>${nameRows}</tbody></table>
-    <div class="scroll" style="margin-top:10px"><table><thead><tr><th>Character</th><th>Cur HP</th><th>Max HP</th>
-     <th>STR</th><th>SKL</th><th>MAG</th><th>EVA</th><th>PDF</th><th>MDF</th><th>SPD</th><th>LUK</th>
-     <th>Rune 1</th><th>Rune 2</th><th>Rune 3</th></tr></thead>
-     <tbody>${chars}</tbody></table></div></div>`;}).join('');}
+    <div class="chargrid">${chars}</div></div>`;}).join('');}
 async function readSave(path){$('#saveout').innerHTML='<p class="mut">reading…</p>';
  const r=await api('/api/read-save',{path});
  if(r.error)return $('#saveout').innerHTML='<p style="color:var(--bad)">'+esc(r.error)+'</p>';
