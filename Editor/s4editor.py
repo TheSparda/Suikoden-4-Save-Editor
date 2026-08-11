@@ -412,9 +412,8 @@ function renderSaves(saves){
       const cur=(c.equip||{})[key]||0;
       const opts=ITEM_OPTS.replace(`value="${cur}">`,`value="${cur}" selected>`);
       return `<div class="fld"><label>${label}</label><select data-ch="${cid}|equip:${key}">${opts}</select></div>`;};
-    return `<div class="charcard" data-name="${esc(c.name.toLowerCase())}" data-ri="${c.rosterIndex}" data-rec="${c.hasData?1:0}">
-      <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span>
-        ${c.hasData?'<span class="badge ok" style="font-size:11px">recruited</span>':'<span class="badge" style="font-size:11px">not recruited</span>'}</div>
+    return `<div class="charcard" data-name="${esc(c.name.toLowerCase())}" data-ri="${c.rosterIndex}" data-data="${c.hasData?1:0}">
+      <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span></div>
       ${statTable}
       <div class="seclabel">Runes</div>
       <div class="grid g3">${rune(0,'Rune 1')}${rune(1,'Rune 2')}${rune(2,'Rune 3')}</div>
@@ -429,23 +428,24 @@ function renderSaves(saves){
     <button class="pri" onclick="writeSave('${f}')">Write ${esc(sv.label)}</button></div>
     <table><tbody>${nameRows}</tbody></table>
     <div class="row" style="margin-top:12px">
-      <input type="search" placeholder="filter characters…" oninput="filterChars('${f}',this.value)" style="width:240px">
-      <label class="mut"><input type="checkbox" checked onchange="reconlyChars('${f}',this.checked)"> recruited only</label>
+      <input type="search" placeholder="filter by name or #…" oninput="filterChars('${f}',this.value)" style="width:240px">
+      <label class="mut"><input type="checkbox" onchange="withdataChars('${f}',this.checked)"> only characters with non-default data</label>
+      <span class="mut" style="font-size:11px">All 113 roster slots are pre-seeded with default stats, so every unit is editable regardless of story recruitment.</span>
     </div>
     <div id="chars-${f}" class="chars">${chars}</div></div>`;}).join('');
  applyCharFilters();}
 // filter state per folder
 const CHARFILT={};
 function filterChars(folder,q){(CHARFILT[folder]=CHARFILT[folder]||{}).q=q.toLowerCase();applyCharFilters();}
-function reconlyChars(folder,on){(CHARFILT[folder]=CHARFILT[folder]||{}).rec=on;applyCharFilters();}
+function withdataChars(folder,on){(CHARFILT[folder]=CHARFILT[folder]||{}).data=on;applyCharFilters();}
 function applyCharFilters(){
  document.querySelectorAll('.chars').forEach(box=>{
    const folder=box.id.slice('chars-'.length);
-   const st=CHARFILT[folder]||{}; const q=st.q||''; const rec=st.rec!==false;
+   const st=CHARFILT[folder]||{}; const q=st.q||''; const dataOnly=!!st.data;
    box.querySelectorAll('.charcard').forEach(card=>{
      const okQ=!q||card.dataset.name.includes(q)||card.dataset.ri===q;
-     const okR=!rec||card.dataset.rec==='1';
-     card.style.display=(okQ&&okR)?'':'none';});});}
+     const okD=!dataOnly||card.dataset.data==='1';
+     card.style.display=(okQ&&okD)?'':'none';});});}
 async function readSave(path){$('#saveout').innerHTML='<p class="mut">reading…</p>';
  const r=await api('/api/read-save',{path});
  if(r.error)return $('#saveout').innerHTML='<p style="color:var(--bad)">'+esc(r.error)+'</p>';
