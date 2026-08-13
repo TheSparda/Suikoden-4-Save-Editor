@@ -469,9 +469,11 @@ function renderSaves(saves){
       const cur=(c.equip||{})[key]||0;
       const opts=ITEM_OPTS.replace(`value="${cur}">`,`value="${cur}" selected>`);
       return `<div class="fld"><label>${label}</label><select data-ch="${cid}|equip:${key}">${opts}</select></div>`;};
-    const noStats=(c.maxHP||0)<=10 && STATS.every(k=>!st[k]);
-    const noGear=!Object.values(c.equip||{}).some(v=>v) && !(c.runes||[]).some(v=>v);
-    const unrec=noStats&&noGear;
+    // Unrecruited units carry a placeholder record: maxHP is 0 or 10. Stats, runes and
+    // equipment can all hold leftover seed garbage (e.g. Mao's stray rune, a stray PDF of
+    // 4/18/25), so maxHP is the only reliable signal — a real recruited unit is always
+    // well above 10 HP.
+    const unrec=(c.maxHP||0)<=10;
     return `<div class="charcard${unrec?' unrec':''}" data-name="${esc(c.name.toLowerCase())}" data-ri="${c.rosterIndex}" data-data="${c.hasData?1:0}">
       <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span>${unrec?'<span class="nrec" title="Placeholder record — this unit is not recruited in this save, so the game stores maxHP 10 and zero stats. Editing it will not recruit them.">not recruited</span>':''}</div>
       ${statTable}
