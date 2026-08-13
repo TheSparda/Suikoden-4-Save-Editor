@@ -23,8 +23,17 @@ Write-back recomputes both, then refreshes each memcard page's Hamming ECC. A ba
 of the whole card is made before the first write.
 """
 import struct, os, shutil, hashlib, zlib
+import s4files as FILES   # individual save-file containers (.cbs/.sps/.psu/.max)
 
 MAGIC = b"Sony PS2 Memory Card Format"
+
+
+def _is_memcard(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read(len(MAGIC)) == MAGIC
+    except OSError:
+        return False
 # Suikoden IV save-folder prefixes by region. The gamedata payload, offsets and checksum
 # are identical across regions (verified: a PAL BESLES-52913 save reproduces the exact
 # CRC32 + reversed-MD5 over 0x20..0x20+0xE240). All are 12 chars, so folder[12:] is the
@@ -450,8 +459,24 @@ def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None):
 
 
 def write_save_edits(path, folder, char_edits=None, name_edits=None, make_backup=True):
-    """Apply edits to one save folder's gamedata on a memcard, in place. Recomputes the
-    checksums + per-page ECC. Backs up the whole card first by default."""
+    """Apply edits to one save's gamedata, in place. On a memcard this rebuilds the
+    checksums + per-page ECC; on an exported save file it re-packs the container.
+    Backs up the file first by default."""
+    if not _is_memcard(path):
+        info = FILES.read_single(path)
+        if "error" in info:
+            return {"error": info["error"]}
+        if not info.get("writable"):
+            return {"error": info.get("note") or f"{info['format']} files are read-only"}
+        new_gd, changed = apply_edits_to_gamedata(info["gamedata"], char_edits, name_edits)
+        if changed == 0:
+            return {"ok": True, "changed": 0, "note": "no editable fields in request"}
+        try:
+            FILES.write_single(path, new_gd, make_backup=make_backup)
+        except Exception as e:
+            return {"error": f"write failed: {e}"}
+        return {"ok": True, "changed": changed, "container": info["format"],
+                "crc": struct.unpack_from("<I", new_gd, CRC_OFF)[0]}
     card = load_card(path)
     target = None
     for e in card.root_entries():
@@ -476,23 +501,41 @@ def write_save_edits(path, folder, char_edits=None, name_edits=None, make_backup
             "crc": struct.unpack_from("<I", new_gd, CRC_OFF)[0]}
 
 
+def _save_dict(gd, folder, *, container="memcard", writable=True, note="", meta=None):
+    """Build the UI save dict from a gamedata payload."""
+    dec = decode_save(gd)
+    dec["folder"] = folder
+    dec["label"] = slot_label(folder)
+    dec["region"] = s4_region(folder)
+    dec["container"] = container      # "memcard" | "cbs" | "psu" | "sps" | ...
+    dec["writable"] = writable
+    if note:
+        dec["note"] = note
+    dec["meta"] = meta or {}
+    for nm in dec["names"]:
+        nm["folder"] = folder
+    return dec
+
+
 def read_all_s4_saves(path):
-    """Open a memcard file, decode every S4 save it contains."""
+    """Decode every S4 save in a memcard image, or the single save in an
+    exported save file (.cbs/.sps/.psu/.max)."""
+    if not _is_memcard(path):
+        info = FILES.read_single(path)
+        if "error" in info:
+            return {"error": info["error"]}
+        return [_save_dict(info["gamedata"], info["folder"],
+                           container=info["format"], writable=info.get("writable", False),
+                           note=info.get("note", ""))]
     card = load_card(path)
     saves = []
     for s in card.find_s4_saves():
         gd = card.read_file(s["cluster"], s["length"], s["folder"])
         if not gd:
             continue
-        dec = decode_save(gd)
-        dec["folder"] = s["folder"]
-        dec["label"] = slot_label(s["folder"])
-        dec["region"] = s4_region(s["folder"])
-        for nm in dec["names"]:
-            nm["folder"] = s["folder"]
         ic = card.read_file(s["cluster"], s["length"], "icon.sys")
-        dec["meta"] = _title_from_icon_sys(ic)
-        saves.append(dec)
+        saves.append(_save_dict(gd, s["folder"], container="memcard", writable=True,
+                                meta=_title_from_icon_sys(ic)))
     return saves
 
 
@@ -529,10 +572,19 @@ def scan_memcards(roots):
                     has_s4 = any(p.encode() in blob for p in S4_PREFIXES)
                 except OSError:
                     continue
-                found.append({"path": full, "name": fn, "size": sz,
+                found.append({"path": full, "name": fn, "size": sz, "kind": "memcard",
                               "mb": round(sz / 1048576, 1), "hasS4": has_s4})
     found.sort(key=lambda x: (not x["hasS4"], x["name"].lower()))
     return found
+
+
+def scan_saves(roots):
+    """Memory-card images AND individual save files (.cbs/.sps/.psu/.max) near roots."""
+    cards = scan_memcards(roots)
+    singles = FILES.scan_single_saves(roots)
+    for s in singles:               # normalize shape to match memcard entries
+        s.setdefault("hasS4", True)
+    return {"memcards": cards, "files": singles}
 
 
 if __name__ == "__main__":

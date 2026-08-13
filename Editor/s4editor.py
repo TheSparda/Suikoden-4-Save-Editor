@@ -51,16 +51,18 @@ def save_config(**kw):
 def pick_file_dialog(kind="card"):
     """Native OS file-open dialog on the server machine (runs locally)."""
     is_card = kind == "card"
-    title = "Select a PS2 memory card" if is_card else "Select a Suikoden IV ISO"
-    CARD_EXTS = (".ps2", ".mcd", ".mc2", ".bin")
+    title = "Select a memory card or save file" if is_card else "Select a Suikoden IV ISO"
+    # memory-card images + individual exported saves
+    CARD_EXTS = (".ps2", ".mcd", ".mc2", ".bin", ".cbs", ".sps", ".psu", ".max", ".psv")
     def _guard(path):
         if is_card and path and not path.lower().endswith(CARD_EXTS):
-            return {"error": "not a PS2 memory-card file (.ps2/.mcd/.mc2/.bin)"}
+            return {"error": "not a memory card or supported save file"}
         return {"path": path}
     try:
         if sys.platform == "darwin":
             import subprocess
-            oftype = ('{"ps2","mcd","mc2","bin"}' if is_card else '{"iso"}')
+            oftype = ('{"ps2","mcd","mc2","bin","cbs","sps","psu","max","psv"}'
+                      if is_card else '{"iso"}')
             scr = (f'set f to choose file with prompt "{title}" of type {oftype}\n'
                    f'POSIX path of f')
             r = subprocess.run(["osascript", "-e", scr], capture_output=True, text=True)
@@ -71,8 +73,8 @@ def pick_file_dialog(kind="card"):
             import tkinter as tk
             from tkinter import filedialog
             root = tk.Tk(); root.withdraw()
-            exts = [("PS2 memory card", "*.ps2 *.mcd *.mc2 *.bin")] if is_card \
-                   else [("PS2 ISO", "*.iso")]
+            exts = [("PS2 saves", "*.ps2 *.mcd *.mc2 *.bin *.cbs *.sps *.psu *.max *.psv")] \
+                   if is_card else [("PS2 ISO", "*.iso")]
             path = filedialog.askopenfilename(title=title, filetypes=exts)
             root.destroy()
             return _guard(path) if path else {"cancelled": True}
@@ -156,8 +158,9 @@ class Handler(BaseHTTPRequestHandler):
                          os.path.abspath(os.path.join(here, "..")),
                          os.path.abspath(os.path.join(here, "..", "Saves")),
                          cfg.get("lastCardRoot", "")}
+                scan = SV.scan_saves(sorted(r for r in roots if r))
                 return self._send(200, {"lastCard": cfg.get("lastCard"),
-                                        "cards": SV.scan_memcards(sorted(r for r in roots if r))})
+                                        "cards": scan["memcards"], "files": scan["files"]})
             return self._send(404, {"error": "not found"})
         except Exception as e:
             return self._send(500, {"error": str(e)})
@@ -186,9 +189,12 @@ class Handler(BaseHTTPRequestHandler):
                                 for k, v in P.RUNE_NAMES.items()), key=lambda r: r["id"])
                 items = sorted(({"id": k, "name": v}
                                 for k, v in SV.ITEM_NAMES.items()), key=lambda r: r["id"])
+                saves = SV.read_all_s4_saves(path)
+                if isinstance(saves, dict) and saves.get("error"):
+                    return self._send(200, {"error": saves["error"]})
                 return self._send(200, {"ok": True, "path": path, "runes": runes,
                                         "items": items, "equipSlots": SV.EQUIP_SLOTS,
-                                        "saves": SV.read_all_s4_saves(path)})
+                                        "saves": saves})
             if self.path == "/api/save-write":
                 path = b.get("path", "")
                 folder = b.get("folder", "")
@@ -436,7 +442,7 @@ let saveInit=false, cardPath=null;
 async function initSave(){saveInit=true;const s=$('#t-save');
  s.innerHTML=`<div class="card">
    <div class="row"><b>PS2 memory card</b><span class="sp"></span>
-     <button class="pri" onclick="pickCard()">Choose card…</button>
+     <button class="pri" onclick="pickCard()">Choose file…</button>
      <button onclick="scanCards()">Scan nearby</button></div>
    <div class="note">Edit character stats, HP, runes, equipment and names on an existing save. Writes recompute the save checksum and refresh the card's ECC so it loads normally; a <code>.bak</code> of the whole card is made before the first write.</div>
    <div id="cardlist" class="mut" style="margin-top:6px"></div>
@@ -444,10 +450,15 @@ async function initSave(){saveInit=true;const s=$('#t-save');
    <div id="saveout"></div>`;
  scanCards();}   // auto-scan so the card list is ready on open
 async function pickCard(){const r=await api('/api/pick',{kind:'card'});if(r.path)readSave(r.path);}
-async function scanCards(){$('#cardlist').innerHTML=spinner('scanning for memory cards…');const r=await api('/api/cards');
- if(!r.cards||!r.cards.length){$('#cardlist').innerHTML='<span class="mut">no PS2 cards found nearby — use “Choose card…”.</span>';return;}
- $('#cardlist').innerHTML='<div class="row" style="margin:8px 0">'+r.cards.map(c=>
-   `<button onclick="readSave('${esc(c.path)}',this)">${esc(c.name)} ${c.hasS4?'<span class=\"badge ok\">S4</span>':''} <span class="mut">${c.mb}MB</span></button>`).join('')+'</div>';}
+async function scanCards(){$('#cardlist').innerHTML=spinner('scanning for saves…');const r=await api('/api/cards');
+ const cards=r.cards||[], files=r.files||[];
+ if(!cards.length && !files.length){$('#cardlist').innerHTML='<span class="mut">no PS2 cards or save files found nearby — use “Choose file…”.</span>';return;}
+ const cardBtn=c=>`<button onclick="readSave('${esc(c.path)}',this)">${esc(c.name)} ${c.hasS4?'<span class=\"badge ok\">S4</span>':''} <span class="mut">${c.mb}MB</span></button>`;
+ const fileBtn=c=>`<button onclick="readSave('${esc(c.path)}',this)">${esc(c.name)} <span class="rgn" style="background:var(--acc)">${esc((c.format||'').toUpperCase())}</span>${c.writable?'':' <span class="badge ro">read-only</span>'}</button>`;
+ let h='';
+ if(cards.length) h+='<div class="mut" style="margin:6px 0 2px">Memory cards</div><div class="row" style="margin:2px 0 8px">'+cards.map(cardBtn).join('')+'</div>';
+ if(files.length) h+='<div class="mut" style="margin:6px 0 2px">Individual save files</div><div class="row" style="margin:2px 0 8px">'+files.map(fileBtn).join('')+'</div>';
+ $('#cardlist').innerHTML=h;}
 let RUNE_LIST=[];   // [{id:int,name}] for rune dropdowns, built on read
 let ITEM_LIST=[];   // [{id:int,name}] for equipment dropdowns
 let ITEM_OPTS='';   // prebuilt <option> string (519 items) reused per slot
@@ -497,9 +508,12 @@ function renderSaves(saves){
       <b>${esc(sv.label)}</b>${sv.region?` <span class="rgn">${esc(sv.region)}</span>`:''} ${cksum}
       <span class="mono mut">${esc(sv.meta&&sv.meta.title||'')}</span>
       <span class="mut" style="font-size:12px">${nrec} recruited</span>
+      ${sv.container&&sv.container!=='memcard'?`<span class="rgn" style="background:var(--acc)">${esc(sv.container.toUpperCase())}</span>`:''}
       <span class="sp"></span>
-      <label class="mut" title="write a .bak of the whole card first" onclick="event.stopPropagation()"><input type="checkbox" class="bak" checked> backup</label>
-      <button class="pri" onclick="event.stopPropagation();writeSave('${f}',this)">Write ${esc(sv.label)}</button>
+      ${sv.writable===false
+        ? `<span class="badge ro" title="${esc(sv.note||'read-only container')}">read-only</span>`
+        : `<label class="mut" title="write a .bak first" onclick="event.stopPropagation()"><input type="checkbox" class="bak" checked> backup</label>
+           <button class="pri" onclick="event.stopPropagation();writeSave('${f}',this)">Write ${esc(sv.label)}</button>`}
     </div>
     <div class="savebody">
     <div class="seclabel">Names</div>
