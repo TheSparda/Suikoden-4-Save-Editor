@@ -1,12 +1,18 @@
-# Suikoden IV ISO & Save Editor
+# Suikoden IV Save Editor
 
-A cross-platform local web app for inspecting and (eventually) editing **Suikoden IV**
-(PS2, USA — SLUS-209.79). Built in the same style as the
+A cross-platform local web app for editing **Suikoden IV** (PS2, USA — SLUS-209.79) PS2
+memory-card saves — character stats, HP, runes, equipment, and names — with a full checksum
++ ECC rebuild so edited saves load normally. Built in the same style as the
 [Suikoden III Editor](https://github.com/TheSparda/Suikoden-3-Editor): stdlib-only Python,
 a local browser UI, and a strict "never write unverified data" discipline.
 
-Nothing is uploaded — the server runs on your machine and only touches the ISO or
-memory-card file you point it at.
+The **Save Editor** is the main event. A **Reference** tab browses the game's characters,
+items and runes, and an **ISO Tools** tab offers read-only disc inspection (identity, file
+map, hex explorer) — ISO/new-game editing is limited because S4's game-data tables are
+packed in a proprietary archive (format documented in `Editor/Suikoden4_offsets.md`).
+
+Nothing is uploaded — the server runs on your machine and only touches the save or ISO
+file you point it at.
 
 ## Requirements
 Python 3.8+ and a modern browser. macOS / Windows / Linux.

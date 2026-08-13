@@ -1,0 +1,14 @@
+{
+  "_note": "Elemental rune affinity per character, 1-4 (bad..excellent). Source: Rune Affinity FAQ v1.3 by OmegaDL50 (GameFAQs). Order: Fire,Lightning,Water,Wind,Earth.",
+  "Hero": [2,2,3,2,2], "Akaghi": [2,3,2,2,2], "Aldo": [3,1,3,3,3], "Ameria": [2,2,2,4,2],
+  "Chiepoo": [2,2,1,2,3], "Dario": [2,2,2,2,4], "Eugene": [3,2,2,2,2], "Flare": [2,3,1,3,2],
+  "Fredrica": [2,3,2,3,2], "Gau": [1,1,1,1,3], "Helmut": [2,2,1,4,3], "Hervey": [4,3,2,1,2],
+  "Izak": [2,2,2,2,4], "Jeane": [2,4,3,3,2], "Jeremy": [3,3,2,2,2], "Jewel": [2,2,3,2,2],
+  "Kate": [3,2,2,2,2], "Keneth": [2,3,2,2,2], "Kika": [2,4,2,2,1], "Konrad": [4,3,3,3,3],
+  "Lino En Kuldes": [2,2,2,2,3], "Lo Fong": [3,2,4,2,4], "Lo Hak": [4,2,2,2,2], "Lo Seng": [3,3,4,2,2],
+  "Mitsuba": [2,2,1,3,2], "Mizuki": [3,2,3,2,2], "Nalkul": [3,2,1,2,2], "Ornan": [2,2,2,2,3],
+  "Pablo": [3,2,2,2,3], "Paula": [2,2,2,3,2], "Rachel": [3,4,3,4,3], "Reinbach": [3,3,3,3,2],
+  "Reinhold": [3,2,2,2,2], "Rita": [2,3,2,2,2], "Selma": [2,2,4,3,3], "Shiramine": [2,2,3,2,3],
+  "Sigurd": [2,1,4,3,2], "Snowe": [1,1,2,2,1], "Tal": [2,1,1,2,2], "Ted": [3,3,3,3,2],
+  "Ugetsu": [2,3,4,2,3], "Viki": [3,3,3,3,3], "Warlock": [3,3,3,3,4], "Wendel": [2,3,2,3,2]
+}

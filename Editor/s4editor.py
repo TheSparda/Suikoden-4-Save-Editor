@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Suikoden IV ISO & Save editor — cross-platform local web app (stdlib only).
+Suikoden IV Save Editor — cross-platform local web app (stdlib only).
 
 Run:  python3 s4editor.py ["Base ISO/Suikoden IV (USA).iso"]
 Then open the printed http://127.0.0.1:PORT URL in any browser.
@@ -232,31 +232,48 @@ class Handler(BaseHTTPRequestHandler):
 INDEX_HTML = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Suikoden IV ISO &amp; Save Editor</title>
+<title>Suikoden IV Save Editor</title>
 <style>
-:root{--bg:#0f1116;--panel:#181b22;--panel2:#1f232c;--fg:#e6e9ef;--mut:#98a2b3;
- --acc:#5b8cff;--acc2:#7ee0c0;--line:#2a2f3a;--warn:#f0b429;--ok:#38b26b;--bad:#e5484d;}
-[data-theme=light]{--bg:#f4f6fb;--panel:#fff;--panel2:#eef1f7;--fg:#1a1d24;
- --mut:#5a6474;--acc:#2f6df0;--line:#dde2ec;--warn:#a05a00;--ok:#188a4e;--bad:#c62a2f;}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);
- font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-header{display:flex;align-items:center;gap:12px;padding:12px 18px;background:var(--panel);
- border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
-h1{font-size:16px;margin:0;font-weight:650}.sp{flex:1}
+:root{
+ /* Ocean / naval theme — deep-sea navy, teal foam, brass */
+ --bg:#0a141e;--panel:#0f2233;--panel2:#143247;--fg:#e8f1f7;--mut:#8fb0c4;
+ --acc:#2ec5c8;--acc2:#f2c14e;--line:#1d4258;--warn:#f2c14e;--ok:#3fd08a;--bad:#ff6b6b;
+ --sea1:#0a141e;--sea2:#0d2033;--foam:rgba(120,224,200,.08);}
+[data-theme=light]{--bg:#eaf4f7;--panel:#ffffff;--panel2:#e2eef3;--fg:#0d2233;
+ --mut:#4a6b7d;--acc:#0e8f96;--acc2:#c78a1a;--line:#c5dbe4;--warn:#a05a00;--ok:#188a4e;--bad:#c62a2f;
+ --sea1:#dcecf2;--sea2:#eaf4f7;--foam:rgba(14,143,150,.06);}
+*{box-sizing:border-box}
+body{margin:0;color:var(--fg);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+ background:linear-gradient(180deg,var(--sea2) 0%,var(--sea1) 60%);background-attachment:fixed;min-height:100vh}
+/* subtle animated foam/wave sheen behind everything */
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
+ background:radial-gradient(1200px 400px at 80% -10%,var(--foam),transparent 70%),
+            radial-gradient(900px 300px at 10% 110%,var(--foam),transparent 70%)}
+header{display:flex;align-items:center;gap:12px;padding:12px 18px;position:sticky;top:0;z-index:5;
+ background:linear-gradient(180deg,var(--panel),var(--sea2));border-bottom:2px solid var(--acc);
+ box-shadow:0 2px 12px rgba(0,0,0,.25);overflow:hidden}
+/* animated wave crest along the header bottom */
+header::after{content:"";position:absolute;left:0;right:0;bottom:0;height:6px;
+ background:repeating-linear-gradient(90deg,var(--acc) 0 8px,transparent 8px 16px);opacity:.35;
+ -webkit-mask:linear-gradient(90deg,transparent,#000,transparent);mask:linear-gradient(90deg,transparent,#000,transparent)}
+h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.02em}
+h1::before{content:"⚓ ";color:var(--acc2)}
+.sp{flex:1}
 button,input,select{font:inherit;color:var(--fg)}
 button{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
  padding:7px 12px;cursor:pointer}button:hover{border-color:var(--acc)}
 button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
 .tabs{display:flex;gap:4px;padding:10px 18px 0}
-.tab{padding:8px 14px;border:1px solid var(--line);border-bottom:none;border-radius:8px 8px 0 0;
+.tab{padding:8px 16px;border:1px solid var(--line);border-bottom:none;border-radius:10px 10px 0 0;
  background:var(--panel2);cursor:pointer;color:var(--mut)}
-.tab.on{background:var(--panel);color:var(--fg);font-weight:600}
+.tab.on{background:var(--panel);color:var(--acc);font-weight:600;box-shadow:0 -2px 0 var(--acc) inset}
 main{padding:18px;max-width:1100px;margin:0 auto}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.card{background:linear-gradient(180deg,var(--panel),var(--sea2));border:1px solid var(--line);
+ border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 1px 10px rgba(0,0,0,.18)}
 .mut{color:var(--mut)}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .badge{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line)}
 .badge.ro{color:var(--warn);border-color:var(--warn)}
-.badge.ok{color:var(--ok);border-color:var(--ok)}
+.badge.ok{color:var(--ok);border-color:var(--ok);background:rgba(63,208,138,.08)}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
 th{color:var(--mut);font-weight:600;position:sticky;top:52px;background:var(--panel)}
@@ -274,8 +291,17 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .subtabs button{background:transparent;color:var(--mut);border:1px solid var(--line);
  border-radius:8px;padding:6px 12px;cursor:pointer}
 .subtabs button.on{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600}
+/* save block header bar — like a ship's nameplate */
+.savecard{padding-top:0;overflow:hidden}
+.savebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-16px -16px 12px;
+ padding:11px 16px;background:linear-gradient(90deg,var(--panel2),var(--panel));
+ border-bottom:1px solid var(--acc)}
+.savebar b{font-size:15px;color:var(--acc)}
+.nametbl{width:auto}.nametbl td{border:0;padding:3px 10px 3px 0}
 .charcard{border:1px solid var(--line);border-radius:10px;padding:12px 14px;
- background:var(--panel2);margin:0 0 12px}
+ background:var(--panel2);margin:0 0 12px;position:relative}
+.charcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+ background:linear-gradient(180deg,var(--acc),var(--acc2));border-radius:10px 0 0 10px;opacity:.7}
 .charhead{font-weight:600;font-size:15px;color:var(--acc2);margin-bottom:8px;
  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .charhead .lvl{color:var(--mut);font-weight:400;font-size:12px}
@@ -299,20 +325,20 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .note{background:var(--panel2);border-left:3px solid var(--warn);padding:8px 12px;border-radius:0 8px 8px 0;margin:8px 0}
 </style></head><body>
 <header>
-  <h1>Suikoden IV <span class="mut">ISO &amp; Save Editor</span></h1>
+  <h1>Suikoden IV <span class="mut">Save Editor</span></h1>
   <span id="meta" class="mut mono"></span>
   <span class="sp"></span>
   <button onclick="toggleTheme()">◐ Theme</button>
 </header>
 <div class="tabs">
-  <div class="tab on" data-t="iso" onclick="tab('iso')">ISO</div>
-  <div class="tab" data-t="save" onclick="tab('save')">Saves</div>
+  <div class="tab on" data-t="save" onclick="tab('save')">Save Editor</div>
   <div class="tab" data-t="ref" onclick="tab('ref')">Reference</div>
+  <div class="tab" data-t="iso" onclick="tab('iso')">ISO Tools</div>
 </div>
 <main>
-  <section id="t-iso"></section>
-  <section id="t-save" hidden></section>
+  <section id="t-save"></section>
   <section id="t-ref" hidden></section>
+  <section id="t-iso" hidden></section>
 </main>
 <script>
 const $=(s,e=document)=>e.querySelector(s);
@@ -322,13 +348,14 @@ function toggleTheme(){const d=document.documentElement;const n=d.getAttribute('
 if(localStorage.s4theme)document.documentElement.setAttribute('data-theme',localStorage.s4theme);
 function tab(t){for(const el of document.querySelectorAll('.tab'))el.classList.toggle('on',el.dataset.t===t);
  for(const s of ['iso','save','ref'])$('#t-'+s).hidden=(s!==t);
- if(t==='ref'&&!refLoaded)loadRef();if(t==='save'&&!saveInit)initSave();}
+ if(t==='ref'&&!refLoaded)loadRef();if(t==='save'&&!saveInit)initSave();if(t==='iso'&&!isoInit){isoInit=true;renderIso();}}
+let isoInit=false;
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
 let meta={};
 async function boot(){meta=await api('/api/meta');
- $('#meta').textContent=meta.loaded?('ISO: '+meta.iso):'no ISO loaded';
- renderIso();}
+ $('#meta').textContent=meta.loaded?('ISO: '+meta.iso):'';
+ initSave();}   // Save Editor is the default tab
 async function renderIso(){
  const info=await api('/api/iso-info');
  const s=$('#t-iso');
@@ -373,14 +400,15 @@ async function hexfind(){$('#findout').textContent='searching…';
 // ---- Saves (editable — checksum solved: CRC32 + reversed MD5 over 0x20..0x20+0xE240)
 let saveInit=false, cardPath=null;
 async function initSave(){saveInit=true;const s=$('#t-save');
- s.innerHTML=`<div class="card"><div class="row"><b>PS2 memory card</b>
-   <span class="badge ok">editable</span><span class="sp"></span>
-   <label class="mut"><input type="checkbox" id="bak" checked> backup card before write</label>
-   <button class="pri" onclick="pickCard()">Choose card…</button>
-   <button onclick="scanCards()">Scan for cards</button></div>
-   <div class="note">Edits recompute the save checksum (CRC32 + reversed MD5) and refresh memcard ECC — the save loads normally. A <code>.bak</code> of the whole card is made before the first write. Test on a copy first.</div>
-   <div id="cardlist" class="mut"></div>
-   <div id="saveout"></div></div>`;}
+ s.innerHTML=`<div class="card">
+   <div class="row"><b>PS2 memory card</b><span class="sp"></span>
+     <button class="pri" onclick="pickCard()">Choose card…</button>
+     <button onclick="scanCards()">Scan nearby</button></div>
+   <div class="note">Edit character stats, HP, runes, equipment and names on an existing save. Writes recompute the save checksum and refresh the card's ECC so it loads normally; a <code>.bak</code> of the whole card is made before the first write.</div>
+   <div id="cardlist" class="mut" style="margin-top:6px"></div>
+   </div>
+   <div id="saveout"></div>`;
+ scanCards();}   // auto-scan so the card list is ready on open
 async function pickCard(){const r=await api('/api/pick',{kind:'card'});if(r.path)readSave(r.path);}
 async function scanCards(){$('#cardlist').textContent='scanning…';const r=await api('/api/cards');
  if(!r.cards||!r.cards.length){$('#cardlist').textContent='no PS2 cards found nearby.';return;}
@@ -422,15 +450,19 @@ function renderSaves(saves){
     </div>`;};
   const chars=(sv.characters||[]).map(charCard).join('');
   const f=esc(sv.folder);
-  return `<div class="card"><div class="row"><b>${esc(sv.label)}</b>
-    <span class="mono mut">${f}</span>${cksum}<span class="sp"></span>
-    <span class="mono mut">${esc(sv.meta&&sv.meta.title||'')}</span>
-    <button class="pri" onclick="writeSave('${f}')">Write ${esc(sv.label)}</button></div>
-    <table><tbody>${nameRows}</tbody></table>
-    <div class="row" style="margin-top:12px">
-      <input type="search" placeholder="filter by name or #…" oninput="filterChars('${f}',this.value)" style="width:240px">
-      <label class="mut"><input type="checkbox" onchange="withdataChars('${f}',this.checked)"> only characters with non-default data</label>
-      <span class="mut" style="font-size:11px">All 113 roster slots are pre-seeded with default stats, so every unit is editable regardless of story recruitment.</span>
+  return `<div class="card savecard">
+    <div class="savebar">
+      <b>${esc(sv.label)}</b> ${cksum}
+      <span class="mono mut">${esc(sv.meta&&sv.meta.title||'')}</span>
+      <span class="sp"></span>
+      <label class="mut" title="write a .bak of the whole card first"><input type="checkbox" class="bak" checked> backup</label>
+      <button class="pri" onclick="writeSave('${f}')">Write ${esc(sv.label)}</button>
+    </div>
+    <div class="seclabel">Names</div>
+    <table class="nametbl"><tbody>${nameRows}</tbody></table>
+    <div class="seclabel" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Characters
+      <input type="search" placeholder="filter by name or #…" oninput="filterChars('${f}',this.value)" style="width:200px;font-weight:400">
+      <label class="mut" style="font-weight:400"><input type="checkbox" onchange="withdataChars('${f}',this.checked)"> only non-default</label>
     </div>
     <div id="chars-${f}" class="chars">${chars}</div></div>`;}).join('');
  applyCharFilters();}
@@ -466,9 +498,11 @@ async function writeSave(folder){
    else charEdits[ridx][field]=+el.value;}
  for(const el of document.querySelectorAll(`[data-name^="${folder}|"]`)){
    const key=el.dataset.name.split('|')[1];nameEdits[key]=el.value;}
- const r=await api('/api/save-write',{path:cardPath,folder,charEdits,nameEdits,backup:$('#bak').checked});
+ const bakEl=document.querySelector(`#chars-${CSS.escape(folder)}`)?.closest('.savecard')?.querySelector('.bak');
+ const backup=bakEl?bakEl.checked:true;
+ const r=await api('/api/save-write',{path:cardPath,folder,charEdits,nameEdits,backup});
  if(r.error)return alert('Write failed: '+r.error);
- alert(`Wrote ${folder}: ${r.changed} field(s) changed. Checksum recomputed.`);
+ alert(`Wrote ${folder}: ${r.changed} field(s) changed. Checksum recomputed — save will load normally.`);
  if(r.saves)renderSaves(r.saves);}
 
 // ---- Reference
