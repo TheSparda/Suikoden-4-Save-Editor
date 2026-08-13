@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-Suikoden IV PS2 memory-card save reader (READ-ONLY, stdlib only).
+Suikoden IV PS2 memory-card save reader + writer (stdlib only).
 
 Opens an 8 MB PS2 memory-card image (*.ps2 / *.mcd), walks the PS2MFS filesystem,
-finds the Suikoden IV USA save folders (BASLUS-20979...), and decodes each save's
-`gamedata` payload for display.
+finds the Suikoden IV save folders (USA BASLUS-20979… / PAL BESLES-52913…), and decodes
+each save's `gamedata` payload for display. The payload layout and checksum are identical
+across regions, so USA and PAL saves are both fully supported.
 
 Layout facts (validated 2026-08-10 against 5 real saves; see Suikoden4_offsets.md):
   - Card pages are 512 data + 16 ECC spare = 528 bytes on disk (PS2MFS).
-  - Each S4 save folder is `BASLUS-20979s4NN`; its payload file has the same name and
-    is 57952 bytes.
-  - gamedata header: +0x00 u32 version(=6), +0x08 u16 slot#, +0x0C .. +0x1F a 20-byte
-    digest/checksum (SHA1-shaped, salted/custom — NOT yet cracked), hero/ship names as
-    ASCII from ~0x28.
+  - Each S4 save folder is `<PREFIX>s4NN` (USA `BASLUS-20979`, PAL `BESLES-52913`); its
+    payload file has the same name and is 57952 bytes.
+  - gamedata header: +0x00 u32 version(=6), +0x08 u16 slot#, +0x0C u32 CRC32 + +0x10..0x1F
+    byte-reversed MD5 over the body (cracked — see below), hero/ship names as ASCII from
+    ~0x28.
 
 WRITING is supported: the save digest was reverse-engineered from SLUS_209.79 (see
 Suikoden4_offsets.md). Over body = gamedata[0x20:0x20+0xE240]:
@@ -24,7 +25,26 @@ of the whole card is made before the first write.
 import struct, os, shutil, hashlib, zlib
 
 MAGIC = b"Sony PS2 Memory Card Format"
-S4_PREFIX = "BASLUS-20979"     # USA Suikoden IV save-folder prefix on the memcard
+# Suikoden IV save-folder prefixes by region. The gamedata payload, offsets and checksum
+# are identical across regions (verified: a PAL BESLES-52913 save reproduces the exact
+# CRC32 + reversed-MD5 over 0x20..0x20+0xE240). All are 12 chars, so folder[12:] is the
+# `s4NN` slot tail regardless of region.
+S4_PREFIXES = ("BASLUS-20979",  # USA  (SLUS-209.79)
+               "BESLES-52913")  # PAL  (SLES-529.13)
+S4_PREFIX = S4_PREFIXES[0]      # default/back-compat (USA)
+
+S4_REGION = {"BASLUS-20979": "NTSC-U", "BESLES-52913": "PAL"}  # prefix -> region label
+
+def s4_match_prefix(name):
+    """Return the region prefix that `name` starts with, or None."""
+    for p in S4_PREFIXES:
+        if name.startswith(p):
+            return p
+    return None
+
+def s4_region(folder):
+    """'BASLUS-20979s400' -> 'NTSC-U', 'BESLES-52913s400' -> 'PAL' (else '')."""
+    return S4_REGION.get(s4_match_prefix(folder) or "", "")
 
 # --- PS2 memory-card ECC (Hamming) — verbatim from mymc (Ross Ridge, public domain).
 def _parityb(a):
@@ -234,7 +254,7 @@ class MemCard:
     def find_s4_saves(self):
         out = []
         for e in self.root_entries():
-            if e["is_dir"] and e["name"].startswith(S4_PREFIX):
+            if e["is_dir"] and s4_match_prefix(e["name"]):
                 out.append({"folder": e["name"], "cluster": e["cluster"],
                             "length": e["length"]})
         return out
@@ -300,8 +320,9 @@ def load_card(path):
 
 
 def slot_label(folder):
-    """'BASLUS-20979s400' -> 'Slot 0'. Falls back to the raw folder tail."""
-    tail = folder[len(S4_PREFIX):]
+    """'BASLUS-20979s400'/'BESLES-52913s400' -> 'Slot 0'. Falls back to the folder tail."""
+    p = s4_match_prefix(folder)
+    tail = folder[len(p):] if p else folder
     if tail.startswith("s4") and tail[2:].isdigit():
         return f"Slot {int(tail[2:])}"
     return tail or folder
@@ -466,6 +487,7 @@ def read_all_s4_saves(path):
         dec = decode_save(gd)
         dec["folder"] = s["folder"]
         dec["label"] = slot_label(s["folder"])
+        dec["region"] = s4_region(s["folder"])
         for nm in dec["names"]:
             nm["folder"] = s["folder"]
         ic = card.read_file(s["cluster"], s["length"], "icon.sys")
@@ -504,7 +526,7 @@ def scan_memcards(roots):
                         continue
                     with open(full, "rb") as fh:
                         blob = fh.read()
-                    has_s4 = S4_PREFIX.encode() in blob
+                    has_s4 = any(p.encode() in blob for p in S4_PREFIXES)
                 except OSError:
                     continue
                 found.append({"path": full, "name": fn, "size": sz,

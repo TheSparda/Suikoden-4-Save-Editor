@@ -1,8 +1,8 @@
 # Suikoden IV Save Editor
 
-A cross-platform local web app for editing **Suikoden IV** (PS2, USA — SLUS-209.79) PS2
-memory-card saves — character stats, HP, runes, equipment, and names — with a full checksum
-+ ECC rebuild so edited saves load normally. Built in the same style as the
+A cross-platform local web app for editing **Suikoden IV** PS2 memory-card saves (USA
+SLUS-209.79 and PAL SLES-529.13) — character stats, HP, runes, equipment, and names — with
+a full checksum + ECC rebuild so edited saves load normally. Built in the same style as the
 [Suikoden III Editor](https://github.com/TheSparda/Suikoden-3-Editor): stdlib-only Python,
 a local browser UI, and a strict "never write unverified data" discipline.
 
@@ -26,7 +26,9 @@ Then open the printed `http://127.0.0.1:8749`.
 
 ## What works today
 - **Saves tab — editable.** Opens a PS2 memory card (`.ps2/.mcd/.mc2/.bin`), finds
-  Suikoden IV saves (`BASLUS-20979…`), and edits every recruited character's HP,
+  Suikoden IV saves (USA `BASLUS-20979…` and PAL `BESLES-52913…` — both fully supported,
+  since the payload layout and checksum are identical across regions), and edits every
+  recruited character's HP,
   eight stats (STR/SKL/MAG/EVA/PDF/MDF/SPD/LUK), all three rune slots, and all seven equipment slots (head/body/hands/feet
   + 3 accessories), plus the hero/ship names. On write it
   recomputes the save checksum and refreshes memcard ECC, so the save loads normally.
@@ -45,12 +47,14 @@ against every sample save; write-back reproduces both exactly. See
 `Editor/Suikoden4_offsets.md`.
 
 ## What's deferred (and why)
-- **New-game ISO stat editing is off.** The in-RAM/save record *shape* is fully known
-  (stride `0x78`; stats at `+0x20…`), but the initial-stats copy that seeds a new game
-  lives packed inside `FILEDATA.*` and hasn't been located yet. The hex explorer exists
-  to help find it.
-- **Equipment/rune editing in saves is off.** The stat block is confirmed; the parallel
-  equipment block's offset within the save isn't verified yet, so it's not written blind.
+- **New-game ISO stat editing is off.** The save record *shape* is fully known, but the
+  initial-stats copy that seeds a new game lives packed inside `FILEDATA.*` and hasn't
+  been located yet. The hex explorer exists to help find it.
+- **A "recruited" toggle is not shipped.** Recruitment isn't stored in the character
+  record, and the save's recruit bit-table couldn't be isolated from the sample saves
+  without a controlled single-recruit diff. Rather than write a guessed flag, it's left
+  out. See the recruitment section in `Editor/Suikoden4_offsets.md`.
+- **Spell/unite parameter tables** aren't located yet (packed game data, no anchors).
 
 See `Editor/Suikoden4_offsets.md` for the full reverse-engineering notes.
 

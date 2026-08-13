@@ -8,15 +8,17 @@ Then open the printed http://127.0.0.1:PORT URL in any browser.
 Nothing is uploaded — the server runs on your machine and only touches the ISO or
 memory-card file you point it at.
 
-SCOPE (v1): This is the honest, verified subset. What is NOT yet write-enabled is
-labeled read-only in the UI, because the underlying data isn't cracked yet:
-  * Save editing is READ-ONLY: the gamedata checksum (a 20-byte digest at 0x0C) is an
-    unsolved save-load gate; writing a modified save could brick the load. See
-    Suikoden4_offsets.md.
+SCOPE: This is the honest, verified subset — nothing is written unless the layout was
+confirmed against real saves.
+  * Save editing is WRITE-ENABLED: each recruited character's HP, eight stats, three rune
+    slots and seven equipment slots, plus the hero/ship names. The gamedata checksum was
+    reverse-engineered (CRC32 + byte-reversed MD5 over the body), so edited saves load
+    normally; memcard ECC is refreshed and a backup is made before the first write.
   * The ISO initial-stats table hasn't been located inside FILEDATA yet, so new-game
     stat editing is not exposed. The ISO tab offers identity, the file map, and a hex
     explorer to support locating it.
 Reference data (113 characters, 519 items, 42 runes, full record layout) is browsable.
+See Suikoden4_offsets.md for the full reverse-engineering notes.
 """
 import json, os, sys, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -298,6 +300,12 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
  border-bottom:1px solid var(--acc);position:sticky;top:47px;z-index:4;
  box-shadow:0 4px 14px rgba(0,0,0,.28)}
 .savebar b{font-size:15px;color:var(--acc)}
+.rgn{font-size:11px;font-weight:700;letter-spacing:.5px;padding:2px 7px;border-radius:999px;
+ background:var(--acc2);color:#1a2a33;vertical-align:middle}
+.nrec{margin-left:auto;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
+ padding:2px 7px;border-radius:999px;background:#3a2b2b;color:#e79a9a;border:1px solid #6b4a4a}
+.charcard.unrec{opacity:.62}
+.charcard.unrec .charhead>span:first-child{color:var(--mut)}
 .nametbl{width:auto}.nametbl td{border:0;padding:3px 10px 3px 0}
 .charcard{border:1px solid var(--line);border-radius:10px;padding:12px 14px;
  background:var(--panel2);margin:0 0 12px;position:relative}
@@ -461,8 +469,11 @@ function renderSaves(saves){
       const cur=(c.equip||{})[key]||0;
       const opts=ITEM_OPTS.replace(`value="${cur}">`,`value="${cur}" selected>`);
       return `<div class="fld"><label>${label}</label><select data-ch="${cid}|equip:${key}">${opts}</select></div>`;};
-    return `<div class="charcard" data-name="${esc(c.name.toLowerCase())}" data-ri="${c.rosterIndex}" data-data="${c.hasData?1:0}">
-      <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span></div>
+    const noStats=(c.maxHP||0)<=10 && STATS.every(k=>!st[k]);
+    const noGear=!Object.values(c.equip||{}).some(v=>v) && !(c.runes||[]).some(v=>v);
+    const unrec=noStats&&noGear;
+    return `<div class="charcard${unrec?' unrec':''}" data-name="${esc(c.name.toLowerCase())}" data-ri="${c.rosterIndex}" data-data="${c.hasData?1:0}">
+      <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span>${unrec?'<span class="nrec" title="Placeholder record — this unit isn\\'t recruited in this save, so the game stores maxHP 10 and zero stats. Editing it won\\'t recruit them.">not recruited</span>':''}</div>
       ${statTable}
       <div class="seclabel">Runes</div>
       <div class="grid g3">${rune(0,'Rune 1')}${rune(1,'Rune 2')}${rune(2,'Rune 3')}</div>
@@ -473,7 +484,7 @@ function renderSaves(saves){
   const f=esc(sv.folder);
   return `<div class="card savecard">
     <div class="savebar">
-      <b>${esc(sv.label)}</b> ${cksum}
+      <b>${esc(sv.label)}</b>${sv.region?` <span class="rgn">${esc(sv.region)}</span>`:''} ${cksum}
       <span class="mono mut">${esc(sv.meta&&sv.meta.title||'')}</span>
       <span class="sp"></span>
       <label class="mut" title="write a .bak of the whole card first"><input type="checkbox" class="bak" checked> backup</label>
