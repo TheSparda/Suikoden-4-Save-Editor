@@ -63,13 +63,13 @@ See `Editor/Suikoden4_offsets.md` for the full reverse-engineering notes.
 Editor/
   s4editor.py            web server + embedded UI
   s4patch.py             ISO identity, file map, hex/byte-search tools
-  s4save.py              PS2 memory-card reader (PS2MFS + ECC), read-only
+  s4save.py              PS2 memory-card reader + writer (PS2MFS + ECC)
   s4_char_offsets.json   113 characters (record offset -> name)
   s4_item_names.json     519 item ids -> names
   s4_rune_names.json     42 rune ids -> names
+  s4_affinities.json     per-character rune affinities
   Suikoden4_offsets.md   reverse-engineering documentation
-Base ISO/                your Suikoden IV (USA).iso
-Cheats/                  the source Cheat Engine table
+Base ISO/                your Suikoden IV disc image (USA or PAL) — not included
 ```
 
 ## Credits

@@ -1,6 +1,0 @@
-{
-  "version": "0.0.1",
-  "configurations": [
-    { "name": "s4editor", "url": "http://localhost:8749" }
-  ]
-}

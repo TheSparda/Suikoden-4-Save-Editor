@@ -6,7 +6,10 @@ Saves/
 *.mcd
 *.mc2
 *.bin
-# The source cheat table is fine to keep; personal memcards are not
+# Third-party research inputs (community cheat table / guides) are not redistributed
+Cheats/
+# Local Claude Code harness artifacts
+.claude/
 __pycache__/
 *.pyc
 .s4editor.json
