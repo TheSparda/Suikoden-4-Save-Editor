@@ -295,6 +295,11 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .subtabs button.on{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600}
 /* save block header bar — like a ship's nameplate */
 .savecard{padding-top:0}
+.savebar{cursor:pointer}
+.caret{display:inline-block;transition:transform .15s;color:var(--acc);font-size:13px}
+.savecard:not(.collapsed) .caret{transform:rotate(90deg)}
+.savecard.collapsed .savebody{display:none}
+.savecard.collapsed .savebar{margin-bottom:-16px;border-radius:12px}
 .savebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-16px -16px 12px;
  padding:11px 16px;background:linear-gradient(90deg,var(--panel2),var(--panel));
  border-bottom:1px solid var(--acc);position:sticky;top:47px;z-index:4;
@@ -448,6 +453,7 @@ let ITEM_LIST=[];   // [{id:int,name}] for equipment dropdowns
 let ITEM_OPTS='';   // prebuilt <option> string (519 items) reused per slot
 let EQUIP_SLOTS=[]; // [[key,offset],...] slot order from the server
 function renderSaves(saves){
+ const many=saves.length>1;   // collapse each save when there are several to choose from
  $('#saveout').innerHTML=saves.map(sv=>{
   const cksum=sv.checksumValid?'<span class="badge ok">checksum ok</span>':'<span class="badge ro">checksum off</span>';
   const nameRows=sv.names.map(n=>`<tr><td class="mut">${esc(n.label)}</td>
@@ -484,22 +490,30 @@ function renderSaves(saves){
     </div>`;};
   const chars=(sv.characters||[]).map(charCard).join('');
   const f=esc(sv.folder);
-  return `<div class="card savecard">
-    <div class="savebar">
+  const nrec=(sv.characters||[]).filter(c=>(c.maxHP||0)>10).length;
+  return `<div class="card savecard${many?' collapsed':''}">
+    <div class="savebar" onclick="toggleSave('${f}',event)" title="click to expand / collapse">
+      <span class="caret">▸</span>
       <b>${esc(sv.label)}</b>${sv.region?` <span class="rgn">${esc(sv.region)}</span>`:''} ${cksum}
       <span class="mono mut">${esc(sv.meta&&sv.meta.title||'')}</span>
+      <span class="mut" style="font-size:12px">${nrec} recruited</span>
       <span class="sp"></span>
-      <label class="mut" title="write a .bak of the whole card first"><input type="checkbox" class="bak" checked> backup</label>
-      <button class="pri" onclick="writeSave('${f}',this)">Write ${esc(sv.label)}</button>
+      <label class="mut" title="write a .bak of the whole card first" onclick="event.stopPropagation()"><input type="checkbox" class="bak" checked> backup</label>
+      <button class="pri" onclick="event.stopPropagation();writeSave('${f}',this)">Write ${esc(sv.label)}</button>
     </div>
+    <div class="savebody">
     <div class="seclabel">Names</div>
     <table class="nametbl"><tbody>${nameRows}</tbody></table>
     <div class="seclabel" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Characters
       <input type="search" placeholder="filter by name or #…" oninput="filterChars('${f}',this.value)" style="width:200px;font-weight:400">
       <label class="mut" style="font-weight:400"><input type="checkbox" onchange="withdataChars('${f}',this.checked)"> only non-default</label>
     </div>
-    <div id="chars-${f}" class="chars">${chars}</div></div>`;}).join('');
+    <div id="chars-${f}" class="chars">${chars}</div></div></div>`;}).join('');
  applyCharFilters();}
+// expand / collapse one save card (ignore clicks on the write button / backup toggle)
+function toggleSave(folder,ev){
+ const card=document.querySelector(`#chars-${CSS.escape(folder)}`)?.closest('.savecard');
+ if(card) card.classList.toggle('collapsed');}
 // filter state per folder
 const CHARFILT={};
 function filterChars(folder,q){(CHARFILT[folder]=CHARFILT[folder]||{}).q=q.toLowerCase();applyCharFilters();}
