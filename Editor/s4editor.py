@@ -473,7 +473,7 @@ function renderSaves(saves){
     const noGear=!Object.values(c.equip||{}).some(v=>v) && !(c.runes||[]).some(v=>v);
     const unrec=noStats&&noGear;
     return `<div class="charcard${unrec?' unrec':''}" data-name="${esc(c.name.toLowerCase())}" data-ri="${c.rosterIndex}" data-data="${c.hasData?1:0}">
-      <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span>${unrec?'<span class="nrec" title="Placeholder record — this unit isn\\'t recruited in this save, so the game stores maxHP 10 and zero stats. Editing it won\\'t recruit them.">not recruited</span>':''}</div>
+      <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span>${unrec?'<span class="nrec" title="Placeholder record — this unit is not recruited in this save, so the game stores maxHP 10 and zero stats. Editing it will not recruit them.">not recruited</span>':''}</div>
       ${statTable}
       <div class="seclabel">Runes</div>
       <div class="grid g3">${rune(0,'Rune 1')}${rune(1,'Rune 2')}${rune(2,'Rune 3')}</div>
