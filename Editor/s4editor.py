@@ -323,6 +323,21 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 @media(max-width:800px){.grid2{grid-template-columns:1fr}}
 .hexline{display:grid;grid-template-columns:90px 1fr 150px;gap:12px;font-family:ui-monospace,monospace;font-size:12px;padding:1px 8px}
 .note{background:var(--panel2);border-left:3px solid var(--warn);padding:8px 12px;border-radius:0 8px 8px 0;margin:8px 0}
+/* loading UX — a spinning ship's helm */
+.loading{display:flex;align-items:center;gap:10px;color:var(--mut);padding:10px 2px}
+.helm{width:20px;height:20px;flex:none;border-radius:50%;border:2px solid var(--line);
+ border-top-color:var(--acc);border-right-color:var(--acc);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+button.busy{position:relative;color:transparent!important;pointer-events:none}
+button.busy::after{content:"";position:absolute;left:50%;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;
+ border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+/* skeleton shimmer for card placeholders */
+.skel{border:1px solid var(--line);border-radius:10px;height:120px;background:
+ linear-gradient(100deg,var(--panel2) 30%,var(--foam) 50%,var(--panel2) 70%);
+ background-size:200% 100%;animation:wave 1.3s ease-in-out infinite}
+@keyframes wave{to{background-position:-200% 0}}
+.skelgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px;margin-top:10px}
+@media(prefers-reduced-motion:reduce){.helm,.skel,button.busy::after{animation:none}}
 </style></head><body>
 <header>
   <h1>Suikoden IV <span class="mut">Save Editor</span></h1>
@@ -343,6 +358,10 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 <script>
 const $=(s,e=document)=>e.querySelector(s);
 const api=(u,b)=>fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:undefined).then(r=>r.json());
+// loading UX helpers
+const spinner=(msg)=>`<div class="loading"><span class="helm"></span><span>${esc(msg||'loading…')}</span></div>`;
+const skelCards=(n=3)=>`<div class="skelgrid">${'<div class="skel"></div>'.repeat(n)}</div>`;
+async function withBusy(btn,fn){ if(btn)btn.classList.add('busy'); try{ return await fn(); } finally{ if(btn)btn.classList.remove('busy'); } }
 function toggleTheme(){const d=document.documentElement;const n=d.getAttribute('data-theme')==='light'?'':'light';
  n?d.setAttribute('data-theme',n):d.removeAttribute('data-theme');localStorage.s4theme=n;}
 if(localStorage.s4theme)document.documentElement.setAttribute('data-theme',localStorage.s4theme);
@@ -357,6 +376,7 @@ async function boot(){meta=await api('/api/meta');
  $('#meta').textContent=meta.loaded?('ISO: '+meta.iso):'';
  initSave();}   // Save Editor is the default tab
 async function renderIso(){
+ $('#t-iso').innerHTML='<div class="card">'+spinner('reading ISO…')+'</div>';
  const info=await api('/api/iso-info');
  const s=$('#t-iso');
  if(!info.loaded){
@@ -393,7 +413,7 @@ async function hexdump(){const off=parseInt($('#hoff').value,16||10)||0;
  const r=await api('/api/iso-dump',{off:parseInt($('#hoff').value),len:parseInt($('#hlen').value)});
  if(r.error)return $('#hexout').textContent=r.error;
  $('#hexout').innerHTML=r.rows.map(x=>`<div class="hexline"><span class="mut">${x.off.toString(16).toUpperCase().padStart(8,'0')}</span><span>${x.hex}</span><span>${esc(x.ascii)}</span></div>`).join('');}
-async function hexfind(){$('#findout').textContent='searching…';
+async function hexfind(){$('#findout').innerHTML=spinner('searching the ISO…');
  const r=await api('/api/iso-find',{hex:$('#hfind').value});
  $('#findout').textContent=r.error?r.error:(r.hits.length+' hit(s): '+r.hits.join('  '));}
 
@@ -410,10 +430,10 @@ async function initSave(){saveInit=true;const s=$('#t-save');
    <div id="saveout"></div>`;
  scanCards();}   // auto-scan so the card list is ready on open
 async function pickCard(){const r=await api('/api/pick',{kind:'card'});if(r.path)readSave(r.path);}
-async function scanCards(){$('#cardlist').textContent='scanning…';const r=await api('/api/cards');
- if(!r.cards||!r.cards.length){$('#cardlist').textContent='no PS2 cards found nearby.';return;}
+async function scanCards(){$('#cardlist').innerHTML=spinner('scanning for memory cards…');const r=await api('/api/cards');
+ if(!r.cards||!r.cards.length){$('#cardlist').innerHTML='<span class="mut">no PS2 cards found nearby — use “Choose card…”.</span>';return;}
  $('#cardlist').innerHTML='<div class="row" style="margin:8px 0">'+r.cards.map(c=>
-   `<button onclick="readSave('${esc(c.path)}')">${esc(c.name)} ${c.hasS4?'<span class=\"badge ok\">S4</span>':''} <span class="mut">${c.mb}MB</span></button>`).join('')+'</div>';}
+   `<button onclick="readSave('${esc(c.path)}',this)">${esc(c.name)} ${c.hasS4?'<span class=\"badge ok\">S4</span>':''} <span class="mut">${c.mb}MB</span></button>`).join('')+'</div>';}
 let RUNE_LIST=[];   // [{id:int,name}] for rune dropdowns, built on read
 let ITEM_LIST=[];   // [{id:int,name}] for equipment dropdowns
 let ITEM_OPTS='';   // prebuilt <option> string (519 items) reused per slot
@@ -456,7 +476,7 @@ function renderSaves(saves){
       <span class="mono mut">${esc(sv.meta&&sv.meta.title||'')}</span>
       <span class="sp"></span>
       <label class="mut" title="write a .bak of the whole card first"><input type="checkbox" class="bak" checked> backup</label>
-      <button class="pri" onclick="writeSave('${f}')">Write ${esc(sv.label)}</button>
+      <button class="pri" onclick="writeSave('${f}',this)">Write ${esc(sv.label)}</button>
     </div>
     <div class="seclabel">Names</div>
     <table class="nametbl"><tbody>${nameRows}</tbody></table>
@@ -478,15 +498,16 @@ function applyCharFilters(){
      const okQ=!q||card.dataset.name.includes(q)||card.dataset.ri===q;
      const okD=!dataOnly||card.dataset.data==='1';
      card.style.display=(okQ&&okD)?'':'none';});});}
-async function readSave(path){$('#saveout').innerHTML='<p class="mut">reading…</p>';
- const r=await api('/api/read-save',{path});
+async function readSave(path,btn){
+ $('#saveout').innerHTML=spinner('reading memory card…')+skelCards(3);
+ const r=await withBusy(btn,()=>api('/api/read-save',{path}));
  if(r.error)return $('#saveout').innerHTML='<p style="color:var(--bad)">'+esc(r.error)+'</p>';
  if(!r.saves.length)return $('#saveout').innerHTML='<p class="mut">no Suikoden IV saves on this card.</p>';
  RUNE_LIST=r.runes||[];
  ITEM_LIST=r.items||[]; EQUIP_SLOTS=r.equipSlots||[];
  ITEM_OPTS=ITEM_LIST.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
  cardPath=r.path;renderSaves(r.saves);}
-async function writeSave(folder){
+async function writeSave(folder,btn){
  if(!cardPath)return;
  const charEdits={}, nameEdits={};
  for(const el of document.querySelectorAll(`[data-ch^="${folder}|"]`)){
@@ -500,14 +521,16 @@ async function writeSave(folder){
    const key=el.dataset.name.split('|')[1];nameEdits[key]=el.value;}
  const bakEl=document.querySelector(`#chars-${CSS.escape(folder)}`)?.closest('.savecard')?.querySelector('.bak');
  const backup=bakEl?bakEl.checked:true;
- const r=await api('/api/save-write',{path:cardPath,folder,charEdits,nameEdits,backup});
+ const r=await withBusy(btn,()=>api('/api/save-write',{path:cardPath,folder,charEdits,nameEdits,backup}));
  if(r.error)return alert('Write failed: '+r.error);
  alert(`Wrote ${folder}: ${r.changed} field(s) changed. Checksum recomputed — save will load normally.`);
  if(r.saves)renderSaves(r.saves);}
 
 // ---- Reference
 let refLoaded=false,refData=null;
-async function loadRef(){refLoaded=true;refData=await api('/api/reference');
+async function loadRef(){refLoaded=true;
+ $('#t-ref').innerHTML='<div class="card">'+spinner('loading reference data…')+'</div>';
+ refData=await api('/api/reference');
  const s=$('#t-ref');
  s.innerHTML=`<div class="card"><div class="row">
    <b>Reference</b><span class="mut">${refData.characters.length} characters · ${refData.items.length} items · ${refData.runes.length} runes</span>
