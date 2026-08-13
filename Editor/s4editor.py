@@ -292,10 +292,11 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
  border-radius:8px;padding:6px 12px;cursor:pointer}
 .subtabs button.on{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600}
 /* save block header bar — like a ship's nameplate */
-.savecard{padding-top:0;overflow:hidden}
+.savecard{padding-top:0}
 .savebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-16px -16px 12px;
  padding:11px 16px;background:linear-gradient(90deg,var(--panel2),var(--panel));
- border-bottom:1px solid var(--acc)}
+ border-bottom:1px solid var(--acc);position:sticky;top:47px;z-index:4;
+ box-shadow:0 4px 14px rgba(0,0,0,.28)}
 .savebar b{font-size:15px;color:var(--acc)}
 .nametbl{width:auto}.nametbl td{border:0;padding:3px 10px 3px 0}
 .charcard{border:1px solid var(--line);border-radius:10px;padding:12px 14px;
