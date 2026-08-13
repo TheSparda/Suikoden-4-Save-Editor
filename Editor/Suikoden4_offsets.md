@@ -179,32 +179,36 @@ holds character/item/spell tables are not yet mapped. Editing needs: identify th
 entry, decompress it, edit, recompress, fix offsets/sizes. Deferred — big effort, and the
 save editor already covers character/rune/equipment editing for existing playthroughs.
 
-## Recruitment flags — LOCATED as save bit-tables, per-character mapping still UNRESOLVED
-Recruitment is **not** stored inside the 0xF0 character record (every offset checked; none
-flip on recruit). It lives in dedicated **bit-tables** in the gamedata body around
-`0x97D8` and `0xA090` (parallel tables also fill nearby, 0x99xx–0xA8xx).
+## Recruitment flags — NOT reliably located (investigated in depth)
+Recruitment is **not** stored inside the 0xF0 character record (every record offset was
+checked across a controlled same-playthrough pair; none flips on recruit).
 
-Proven with a controlled same-playthrough pair — CodeBreaker saves `11240` (s401) and
-`11251` (s402), identical level (99) and playtime (98999), differing almost only by
-recruitment (heuristic recruited 41 → 91, +50 units):
-- Region `0x97D8..0x97F4` (29 bytes): popcount 0 → 50 across the pair — gains **exactly
-  +50 bits == the 50 newly-recruited units**, and the earlier save's set bits are a strict
-  subset of the later's (recruitment only adds). `0xA090..0xA0AD` behaves the same (2 → 52).
-- The bytes show an "every-third-bit" texture (0x92/0x24/0x49 = `10010010 00100100
-  01001001`), i.e. the flags are packed **~3 bits per entry**, not one clean bit per unit.
+A deep search of the gamedata body did not yield a verifiable recruit bit-table. Two
+leads looked promising by magnitude but both proved to be **coincidences**:
+- `0x97D8`/`0xA090` gain ~+50 bits between CodeBreaker saves `11240`→`11251` (a near-ideal
+  controlled pair: same playthrough, level 99, playtime 98999, ~50 units recruited between
+  them). But these regions are **empty in early saves** where the Hero et al. are already
+  recruited, so they can't be a persistent recruit flag — they track some other ~50-entry
+  event/collection that happened to grow by the same count.
+- `0x9606` has ~50 bits set in every save (an "every-third-bit" `001`-per-entry pattern),
+  but the region is **byte-identical across all five saves** — a static config table, not
+  recruitment.
 
-**Blocker:** the table is indexed by the game's internal star/character number, which is a
-permutation of our roster index (`record/0x78`). Testing `bit=i` and `bit=3i+phase` against
-each unit's recruited state across 5 saves gives ~42% mismatch (near-random), so the order
-is not derivable from roster index, and our equip/maxHP "recruited" heuristic is too fuzzy
-(seed data pre-fills maxHP) to serve as ground truth for solving the permutation.
+Root cause of the blocker: solving this from saves alone needs a trustworthy per-character
+"is recruited" ground truth, and the only one available (equip/maxHP/rune record-filled)
+is a **heuristic** — the new-game seed pre-fills maxHP, so it over/mis-counts. Against that
+fuzzy truth, several unrelated regions match by count, and none matches the full
+across-saves *signature* multiset. ELF disassembly didn't rescue it either: the game text
+is packed (no name-string anchors), there is no static character↔star permutation table
+(the one 108-value run found at vaddr `0x501D90` is a graphics byte-swizzle table), and the
+save block is assembled via indirection that hides the recruit table's RAM base.
 
-**What would finish it (verified):** a **single-recruit** controlled pair — save, recruit
-exactly ONE known unit, save again to a new slot. Diff pinpoints the one bit that flips at
-`0x97D8`/`0xA090`, giving that unit's exact bit with zero ambiguity; repeat per unit (or
-enough to infer the ordering). A speculative toggle is intentionally NOT shipped — and note
-that flipping a recruit bit alone may not make a unit usable, since HQ/party availability
-and story gates are separate state.
+**What would finish it (verified, cheap):** a **single-recruit** controlled pair — save,
+recruit exactly ONE known unit, save again to a new slot. A one-unit diff pinpoints the
+single bit that flips, giving that unit's exact bit with zero ambiguity; a few such pairs
+reveal the ordering for all units. A speculative toggle is intentionally NOT shipped — and
+note that flipping a recruit bit alone may not make a unit usable, since HQ/party
+availability and story gates are separate state.
 
 ## Spell / unite tables — NOT yet located
 S3 kept spell/unite parameter tables in the ELF 2nd PT_LOAD, findable by an ascending
