@@ -8,8 +8,9 @@ individual exported-save formats people trade online, extracting the 57952-byte 
 
   * .cbs  CodeBreaker  — RC4 (fixed S-box) + zlib.        READ + WRITE (round-trip verified)
   * .psu  EMS / uLaunchELF — raw dirents, no compression.  READ + WRITE (in-place patch)
-  * .sps  SharkPort / X-Port — raw + a trailing checksum.  READ only (container checksum
-                                                            algorithm unverified)
+  * .sps  SharkPort / X-Port — raw + a trailing checksum.  READ + WRITE (checksum
+                                                            reverse-engineered + verified)
+  * .psv  PS3 export — HMAC-SHA1 signed.                    READ only (Sony signature)
   * .max  MAX Drive — lzari-compressed.                    UNSUPPORTED (no lzari)
 
 The payload is located by self-validation: the S4 gamedata carries its own CRC32 +
@@ -63,6 +64,27 @@ def _find_payload(blob):
         if _valid_gd(blob[i:i + GD_LEN]):
             return i
         start = i + 1
+
+
+def _sps_datastart(blob):
+    """Offset where the SharkPort data section begins (after the 3 length-prefixed
+    strings and the flen field), or None if the header doesn't parse."""
+    try:
+        o = 17 + 4                                  # magic + savetype
+        for _ in range(3):                          # dirname, datestamp, comment
+            n = struct.unpack_from("<I", blob, o)[0]; o += 4 + n
+        return o + 4                                # skip flen
+    except Exception:
+        return None
+
+
+def _sps_checksum(section):
+    """SharkPort trailing checksum (verified against real S4 .sps files): the mymc
+    running-shift sum over the data section [datastart : len-4]."""
+    h = 0
+    for c in section:
+        h = (h + (c << (h % 24))) & 0xFFFFFFFF
+    return h
 
 
 def _folder_of(blob):
@@ -129,8 +151,8 @@ def extract(blob):
     gd = blob[o:o + GD_LEN]
     folder = _folder_of(blob)
     if fmt == "sps":
-        return {"format": "sps", "folder": folder, "gamedata": gd, "writable": False,
-                "note": "SharkPort container checksum not reconstructed — read-only"}
+        return {"format": "sps", "folder": folder, "gamedata": gd, "writable": True,
+                "note": ""}
     if fmt == "psv":
         return {"format": "psv", "folder": folder, "gamedata": gd, "writable": False,
                 "note": "PS3 (.psv) is signed — read-only"}
@@ -157,11 +179,21 @@ def repack(blob, new_gd):
         struct.pack_into("<L", out, 16, len(comp))   # flen = compressed length
         out += comp
         out = bytes(out)
-    elif fmt in ("psu",):
+    elif fmt == "psu":
         o = _find_payload(blob)
         if o < 0:
             raise ValueError("payload not found")
         out = bytearray(blob); out[o:o + GD_LEN] = new_gd; out = bytes(out)
+    elif fmt == "sps":
+        o = _find_payload(blob)
+        ds = _sps_datastart(blob)
+        if o < 0 or ds is None:
+            raise ValueError("SharkPort payload/header not parsed")
+        out = bytearray(blob)
+        out[o:o + GD_LEN] = new_gd                         # patch the S4 payload
+        struct.pack_into("<I", out, len(out) - 4,          # recompute trailing checksum
+                         _sps_checksum(bytes(out[ds:len(out) - 4])))
+        out = bytes(out)
     else:
         raise ValueError("%s files are read-only" % (fmt or "unknown"))
     # verify: the re-packed file must decode back to exactly new_gd

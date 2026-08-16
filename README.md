@@ -20,13 +20,14 @@ checksum are identical across regions, and each save is labelled with its region
   | PS2 memory card (PS2MFS) | `.ps2` `.mcd` `.mc2` `.bin` | ✅ | ✅ |
   | CodeBreaker | `.cbs` | ✅ | ✅ |
   | EMS / uLaunchELF | `.psu` | ✅ | ✅ |
-  | SharkPort / X-Port | `.sps` | ✅ | read-only\* |
+  | SharkPort / X-Port | `.sps` | ✅ | ✅ |
   | PS3 export (signed) | `.psv` | ✅ | read-only\* |
   | MAX Drive | `.max` | — | — (lzari) |
 
-  \* Read-only formats can be viewed and their stats inspected, but aren't written back
-  because the container's own integrity field (SharkPort checksum / PS3 signature) isn't
-  reconstructed — we won't emit a file we can't rebuild exactly.
+  \* `.psv` is a PS3 export signed with an HMAC-SHA1 signature; it's viewable/editable in
+  the UI but not written back, since re-signing needs Sony's key. To edit a `.psv`, convert
+  it to a memory card or `.psu`/`.cbs` first. (`.max` uses lzari compression and isn't read
+  yet.)
 
 - **Full per-character editing** for every recruited unit:
   - **Max HP** and all eight stats — STR, SKL, MAG, EVA, PDF, MDF, SPD, LUK
