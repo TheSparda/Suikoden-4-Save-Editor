@@ -300,6 +300,9 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
  border-radius:8px;padding:6px 12px;cursor:pointer}
 .subtabs button.on{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600}
 /* save block header bar — like a ship's nameplate */
+.appfoot{margin:26px 0 12px;text-align:center;color:var(--mut);font-size:12px}
+.appfoot a{color:var(--acc);text-decoration:none}
+.appfoot a:hover{text-decoration:underline}
 .savecard{padding-top:0}
 .savebar{cursor:pointer}
 .caret{display:inline-block;transition:transform .15s;color:var(--acc);font-size:13px}
@@ -375,6 +378,7 @@ button.busy::after{content:"";position:absolute;left:50%;top:50%;width:14px;heig
   <section id="t-ref" hidden></section>
   <section id="t-iso" hidden></section>
 </main>
+<footer class="appfoot">Made by <b>Sparda</b> · <a href="https://github.com/TheSparda/Suikoden-4-Save-Editor" target="_blank" rel="noopener">github.com/TheSparda/Suikoden-4-Save-Editor</a></footer>
 <script>
 const $=(s,e=document)=>e.querySelector(s);
 const api=(u,b)=>fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:undefined).then(r=>r.json());
