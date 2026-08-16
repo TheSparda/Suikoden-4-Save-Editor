@@ -457,8 +457,9 @@ async function pickCard(){const r=await api('/api/pick',{kind:'card'});if(r.path
 async function scanCards(){$('#cardlist').innerHTML=spinner('scanning for saves…');const r=await api('/api/cards');
  const cards=r.cards||[], files=r.files||[];
  if(!cards.length && !files.length){$('#cardlist').innerHTML='<span class="mut">no PS2 cards or save files found nearby — use “Choose file…”.</span>';return;}
- const cardBtn=c=>`<button onclick="readSave('${esc(c.path)}',this)">${esc(c.name)} ${c.hasS4?'<span class=\"badge ok\">S4</span>':''} <span class="mut">${c.mb}MB</span></button>`;
- const fileBtn=c=>`<button onclick="readSave('${esc(c.path)}',this)">${esc(c.name)} <span class="rgn" style="background:var(--acc)">${esc((c.format||'').toUpperCase())}</span>${c.writable?'':' <span class="badge ro">read-only</span>'}</button>`;
+ const pdir=p=>{const s=String(p).split(/[\\\\/]/);return s.length>1?s[s.length-2]:'';};
+ const cardBtn=c=>`<button title="${esc(c.path)}" onclick="readSave('${esc(c.path)}',this)">${esc(c.name)} ${c.hasS4?'<span class=\"badge ok\">S4</span>':''} <span class="mut">${c.mb}MB</span></button>`;
+ const fileBtn=c=>`<button title="${esc(c.path)}" onclick="readSave('${esc(c.path)}',this)">${esc(c.name)} <span class="rgn" style="background:var(--acc)">${esc((c.format||'').toUpperCase())}</span>${c.writable?'':' <span class="badge ro">read-only</span>'}${pdir(c.path)?` <span class="mut">· ${esc(pdir(c.path))}/</span>`:''}</button>`;
  let h='';
  if(cards.length) h+='<div class="mut" style="margin:6px 0 2px">Memory cards</div><div class="row" style="margin:2px 0 8px">'+cards.map(cardBtn).join('')+'</div>';
  if(files.length) h+='<div class="mut" style="margin:6px 0 2px">Individual save files</div><div class="row" style="margin:2px 0 8px">'+files.map(fileBtn).join('')+'</div>';
