@@ -1,62 +1,83 @@
 # Suikoden IV Save Editor
 
-A cross-platform **save editor** for **Suikoden IV** (PlayStation 2) — edit character stats,
-HP, runes, equipment and names directly in your PS2 saves, then have the file re-checksummed
-and re-ECC'd so the game loads it normally. It runs as a small local web app (stdlib-only
-Python, no install, nothing uploaded) in the same spirit as the
-[Suikoden III Editor](https://github.com/TheSparda/Suikoden-3-Editor): **never write
-unverified data.**
+A cross-platform **save editor** for **Suikoden IV** (PlayStation 2). Edit recruitment,
+levels, stats, runes, equipment, unite attacks, money, and more — directly in your PS2
+saves — and the file is re-checksummed and re-ECC'd so the game loads it normally.
 
-Works with both **NTSC-U** (SLUS-209.79) and **PAL** (SLES-529.13) — the save layout and
-checksum are identical across regions, and each save is labelled with its region.
+It runs as a small local web app: stdlib-only Python, no install, nothing uploaded. Built
+in the same spirit as the [Suikoden III Editor](https://github.com/TheSparda/Suikoden-3-Editor)
+with one rule throughout: **never write unverified data.** Every offset below was
+reverse-engineered and verified against real saves before its input appears in the UI.
+
+Supports **NTSC-U** (SLUS-209.79) and **PAL** (SLES-529.13) — the save layout and checksum
+are identical across regions, and each save shows a region badge.
 
 ---
 
-## Highlights
+## What you can edit
 
-- **Opens what you actually have.** Whole memory-card images *and* individual exported saves:
-  | Format | Extension | Read | Write |
-  |---|---|:--:|:--:|
-  | PS2 memory card (PS2MFS) | `.ps2` `.mcd` `.mc2` `.bin` | ✅ | ✅ |
-  | CodeBreaker | `.cbs` | ✅ | ✅ |
-  | EMS / uLaunchELF | `.psu` | ✅ | ✅ |
-  | SharkPort / X-Port | `.sps` | ✅ | ✅ |
-  | PS3 export (signed) | `.psv` | ✅ | read-only\* |
-  | MAX Drive | `.max` | ✅ | read-only\* |
+### Per character (all 113)
+| Field | Range | Notes |
+|---|---|---|
+| **Recruitment status** | Not Recruited / In Your Company / Recruited / In Party / Permanently In Party | The exact per-character flag the game checks — the first public recruitment editor for S4 |
+| **Level / EXP** | 1–99 / 0–98,999 | Level drives EXP via the game's flat `EXP = (Lv−1)×1000` curve |
+| **Weapon level** | 1–15 | Skip the sharpening costs |
+| **Max HP** | 0–9,999 | |
+| **Stats** | STR SKL MAG EVA PDF MDF SPD LUK, 0–999 | |
+| **Runes** | 3 slots, full 42-rune list | |
+| **Unite attacks** | 0–3 per combo | All **29 combos listed by name** with partner tooltips (e.g. Ted's Bow & Arrow + Barrage 1–4) |
+| **Equipment** | 7 slots (head/body/hands/feet + 3 accessories), 519-item list | |
 
-  \* `.psv` is a PS3 export signed with an HMAC-SHA1 signature; it's viewable/editable in
-  the UI but not written back, since re-signing needs Sony's key. To edit a `.psv`, convert
-  it to a memory card or `.psu`/`.cbs` first. `.max` is readable (LZARI decoder ported from
-  mymc) but not re-encoded, so it's read-only too.
+### Per save
+- **Hero name** and **ship name**
+- **Potch** (money, up to 99,999,999)
+- **Game time** (the playtime clock, in seconds with h:mm display)
+- **World map** — shows % explored, one-click **"mark fully explored"**
 
-- **Full per-character editing** for every unit:
-  - **Recruitment status** — a real per-character flag (Not Recruited / In Your Company /
-    Recruited / In Party / Permanently In Party), the same byte the game itself checks
-  - **EXP** (level derives from it) and **weapon level** (1–15)
-  - **Max HP** and all eight stats — STR, SKL, MAG, EVA, PDF, MDF, SPD, LUK
-  - **Three rune slots** (full rune list) and **unite-attack levels** (0–3)
-  - **Seven equipment slots** — head, body, hands, feet, and three accessories
-  - Plus the **hero name**, **ship name**, **potch (money)**, and a one-click
-    **"world map fully explored"** toggle
+> Recruiting via the dropdown flips the same byte the game uses, so the unit appears
+> recruited exactly as if you'd met them. Story-gated events tied to specific plot beats
+> remain governed by separate event state.
 
-- **Safe writes.** On save the app recomputes the gamedata checksum (CRC32 + byte-reversed
-  MD5), refreshes each memory-card page's Hamming ECC, and for single-file containers
-  re-packs and then **re-decodes to verify** the payload survived exactly. A `.bak` is made
-  before the first write.
+## Supported save formats
 
-- **Quality-of-life UI.** Auto-scan for nearby saves, native file picker, **NTSC-U / PAL**
-  badges, a live **checksum-ok** indicator, **collapsible** save cards when a card holds
-  several slots, a sticky **Write** bar, per-save name/# filtering, and a per-character
-  **recruitment dropdown** (unrecruited units render dimmed).
+Open whole memory-card images *or* the individual exported saves people trade online:
 
-- **Reference tab** — browsable database: 113 characters, 519 items, 42 runes, and the full
-  character-record layout.
+| Format | Extension | Read | Write |
+|---|---|:--:|:--:|
+| PS2 memory card (PS2MFS) | `.ps2` `.mcd` `.mc2` `.bin` | ✅ | ✅ |
+| CodeBreaker | `.cbs` | ✅ | ✅ |
+| EMS / uLaunchELF | `.psu` | ✅ | ✅ |
+| SharkPort / X-Port | `.sps` | ✅ | ✅ |
+| MAX Drive | `.max` | ✅ | read-only\* |
+| PS3 export (signed) | `.psv` | ✅ | read-only\* |
 
-- **ISO Tools tab** — read-only disc inspection (identity/serial, ISO9660 file map, hex
-  explorer + byte search). New-game/ISO editing is deferred (see below).
+\* `.max` is decoded via an LZARI decompressor ported from mymc, but re-encoding isn't
+implemented; `.psv` carries an HMAC-SHA1 signature that needs Sony's key to rebuild. To
+edit either, convert it to a memory card / `.psu` / `.cbs` first.
 
-Nothing leaves your machine — the server runs locally and only touches the file you point
-it at.
+## Safe writes
+
+- The gamedata **checksum** (CRC32 + byte-reversed MD5) is recomputed on every write, so
+  edited saves load normally.
+- Memory-card writes refresh each page's **Hamming ECC**; single-file containers are
+  re-packed and then **re-decoded to verify** the payload survived byte-for-byte.
+- A **`.bak`** of the file is made before the first write.
+- Inputs clamp to the game's own caps (EXP 98,999, weapon level 15, potch 99,999,999, …).
+
+## The UI
+
+- **Auto-scan** finds memory cards and save files near the project, listed as aligned rows
+  (name / folder / badges / size) with a filter box — or use the native **file picker**.
+- **NTSC-U / PAL** badges, a live **checksum-ok** indicator, and a **recruited count** per save.
+- Multi-slot cards start **collapsed**; click a save's header to expand it. The **Write**
+  bar stays pinned while you scroll.
+- Character list with name/# filtering; unrecruited units render dimmed.
+- **Reference tab**: browsable database — 113 characters, 519 items, 42 runes, and the
+  full character-record layout.
+- **ISO Tools tab**: read-only disc inspection (identity/serial, ISO9660 file map, hex
+  explorer + byte search).
+
+Nothing leaves your machine — the server runs locally and only touches the file you point it at.
 
 ---
 
@@ -70,56 +91,54 @@ Requires **Python 3.8+** and a modern browser (macOS / Windows / Linux).
 
 Then open the printed `http://127.0.0.1:8749`.
 
-## How to use
-
-1. **Save Editor** tab → **Choose file…** or pick one from the auto-scanned list
-   (memory cards and individual save files are listed separately).
-2. Expand a save (multi-slot cards start collapsed), edit any recruited character's stats,
-   runes, equipment, or the hero/ship names.
-3. Click **Write**. A backup is made, the checksum + ECC are rebuilt, and the save reloads
-   to confirm.
-
-> To recruit a unit, set its **Recruitment** dropdown (e.g. to "Recruited") and Write —
-> this flips the same flag the game checks. Note that story-gated content tied to specific
-> plot beats remains governed by separate event state.
+**Quick start:** Save Editor tab → pick a save from the scanned list (or **Choose file…**)
+→ expand a slot → edit → **Write**. A backup is made, the checksum + ECC are rebuilt, and
+the save reloads to confirm.
 
 ---
 
 ## How it works (verified internals)
 
-**Save checksum — solved.** The gamedata payload (57,952 bytes) is gated by a 20-byte digest
-at `0x0C`, reverse-engineered from the game's MIPS code. Over `body = gamedata[0x20 :
-0x20+0xE240]`:
-- `+0x0C` = `CRC32(body)` (little-endian)
-- `+0x10` = `MD5(body)` stored **byte-reversed**
+**Save checksum — solved.** The 57,952-byte gamedata payload is gated by a 20-byte digest
+at `0x0C`, reverse-engineered from the game's MIPS code. Over
+`body = gamedata[0x20 : 0x20+0xE240]`: `+0x0C` = `CRC32(body)` and `+0x10` = `MD5(body)`
+stored byte-reversed. Write-back reproduces both exactly.
 
-Verified against every sample save; write-back reproduces both exactly.
+**The save is a RAM snapshot.** MIPS disassembly of `SLUS_209.79` showed the gamedata is a
+verbatim image of the game's state block at EE address `0x532860` — so every live-RAM
+address from the community cheat table maps linearly to a save offset
+(`save = ram − 0x532860`). This single fact unlocked most of the fields below.
 
-**Character record.** 240-byte (`0xF0`) records starting at gamedata `0x1E4`, one per roster
-index. Runes at `+0x00/+0x02/+0x04`; a stat sub-block at `+0x74` (EXP, Max HP, the eight
-stats); equipment at `+0xBC…+0xC8`. Anchored with known facts (Hero = Rune of Punishment,
-Ted = Soul Eater) across independent playthroughs.
+**Character records.** 240-byte (`0xF0`) records from `0x1E4`, one per roster index:
+runes at `+0x00/02/04`, stats at `+0x74…`, equipment at `+0xBC…+0xC8`. Anchored with known
+facts (Hero = Rune of Punishment, Ted = Soul Eater) across independent playthroughs.
 
-**Recruitment flag — solved.** MIPS disassembly showed the save gamedata is a verbatim
-image of the game's state block at EE `0x532860`, which let the community cheat table's
-live "Recruited" byte be mapped straight into the save: one byte per character at
-`0x164 + rosterIndex*0x78` (0 Not Recruited / 1 In Your Company / 10 Recruited /
-11 In Party / 15 Permanently In Party). Verified across NTSC-U and PAL saves.
+**Recruitment flag — solved.** One byte per character at `0x164 + index*0x78`
+(0 / 1 / 10 / 11 / 15). Verified across 8 saves in both regions: values are enum-pure,
+counts track story progression, and decoding "in party" states reproduces story-accurate
+party lists.
 
-**Single-file containers.** The 57,952-byte payload is located by *self-validation* — the
-one window whose internal CRC/MD5 checks out — which is format-agnostic for uncompressed
-containers; CodeBreaker files are RC4+zlib-decoded first.
+**Progression record.** `0x108 + index*0x78`: EXP (u32, capped 98,999), weapon level
+(u8), and the five named unite-attack level slots (`+0x65…+0x6D`), with the slot→combo
+mapping taken from the cheat table's addresses and named from ninjaskipper's GameFAQs
+Combo Attacks guide.
 
-Full notes: `Editor/Suikoden4_offsets.md`.
+**Single-file containers.** The payload is located by *self-validation* — the one window
+whose internal CRC/MD5 checks out. CodeBreaker files are RC4+zlib decoded; SharkPort's
+trailing checksum was reverse-engineered and verified; MAX Drive is LZARI-decompressed.
 
-## What's deferred (and why)
+Full notes: [`Editor/Suikoden4_offsets.md`](Editor/Suikoden4_offsets.md).
 
-- **New-game / ISO stat editing.** The record *shape* is known, but the initial-stats table
-  that seeds a new game is packed inside `FILEDATA.*` and hasn't been located. The hex
-  explorer exists to help find it.
-- **Spell / unite parameter tables** — packed game data, not yet located.
-- **`.psv` / `.max` write** — the PS3 signature needs Sony's key, and MAX Drive's LZARI
-  re-encoder isn't ported (reading works).
+## Not included (and why)
+
+- **Inventory / item bag** — the save holds two parallel equipment-shaped blocks per
+  character and no clean (item, qty) array; pinning which is which safely needs a
+  controlled before/after save. Held back rather than guessed.
+- **New-game / ISO editing and rune-spell tables** — S4 keeps its parameter tables inside
+  `FILEDATA`'s ~1,000 unlabeled sub-archives, consumed by overlay code, with no strings
+  and no static tables in the boot ELF (join stats are *computed* from growth curves, not
+  stored). A PCSX2 savestate would unlock this; until then the ISO tab stays read-only.
+- **`.psv` / `.max` writing** — Sony signature / LZARI re-encoder respectively.
 
 ---
 
@@ -127,19 +146,22 @@ Full notes: `Editor/Suikoden4_offsets.md`.
 ```
 Editor/
   s4editor.py            web server + embedded UI
-  s4save.py              PS2 memory-card reader + writer (PS2MFS + ECC)
-  s4files.py             individual save-file containers (.cbs/.psu/.sps/.psv)
+  s4save.py              PS2 memory-card reader + writer (PS2MFS + ECC) and save codec
+  s4files.py             single-file containers (.cbs/.psu/.sps/.psv/.max)
+  s4lzari.py             LZARI decoder (ported from mymc) for MAX Drive saves
   s4patch.py             ISO identity, file map, hex/byte-search tools
   s4_char_offsets.json   113 characters (record offset -> name)
   s4_item_names.json     519 item ids -> names
   s4_rune_names.json     42 rune ids -> names
+  s4_unites.json         per-character unite-attack slot names + partners
   s4_affinities.json     per-character rune affinities
   Suikoden4_offsets.md   reverse-engineering documentation
 Base ISO/                your Suikoden IV disc image (USA or PAL) — not included
 ```
 
 ## Credits
-Data model derived from the community PCSX2 Cheat Engine table for Suikoden IV.
-PS2 memory-card ECC routine and the CodeBreaker RC4 constant from `mymc`
-(Ross Ridge, public domain). Save files, disc images, and third-party guides are **not**
-included in this repository.
+Data model derived from the community PCSX2 Cheat Engine tables for Suikoden IV.
+PS2 memory-card ECC, the CodeBreaker RC4 constant, and the LZARI algorithm from `mymc`
+(Ross Ridge, public domain). Unite-attack names from ninjaskipper's GameFAQs Combo
+Attacks guide. Save files, disc images, and third-party guides are **not** included in
+this repository.
