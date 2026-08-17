@@ -301,6 +301,19 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
  border-radius:8px;padding:6px 12px;cursor:pointer}
 .subtabs button.on{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600}
 /* save block header bar — like a ship's nameplate */
+/* save-picker list */
+.pickhead{margin:12px 0 4px;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+.picklist{border:1px solid rgba(46,197,200,.25);border-radius:10px;overflow:hidden}
+.pickrow{display:grid;grid-template-columns:minmax(180px,1fr) minmax(120px,auto) auto 64px;
+ gap:12px;align-items:center;padding:8px 12px;cursor:pointer;
+ border-bottom:1px solid rgba(46,197,200,.12)}
+.pickrow:last-child{border-bottom:none}
+.pickrow:hover{background:rgba(46,197,200,.10)}
+.pickrow .pname{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pickrow .pdir{color:var(--mut);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.pickrow .pbadges{white-space:nowrap}
+.pickrow .psize{color:var(--mut);font-size:12px;text-align:right}
+.pickfilter{width:280px;margin:6px 0 2px;padding:6px 10px}
 .appfoot{margin:26px 0 12px;text-align:center;color:var(--mut);font-size:12px}
 .appfoot a{color:var(--acc);text-decoration:none}
 .appfoot a:hover{text-decoration:underline}
@@ -458,13 +471,23 @@ async function pickCard(){const r=await api('/api/pick',{kind:'card'});if(r.path
 async function scanCards(){$('#cardlist').innerHTML=spinner('scanning for saves…');const r=await api('/api/cards');
  const cards=r.cards||[], files=r.files||[];
  if(!cards.length && !files.length){$('#cardlist').innerHTML='<span class="mut">no PS2 cards or save files found nearby — use “Choose file…”.</span>';return;}
- const pdir=p=>{const s=String(p).split(/[\\\\/]/);return s.length>1?s[s.length-2]:'';};
- const cardBtn=c=>`<button title="${esc(c.path)}" onclick="readSave('${esc(c.path)}',this)">${esc(c.name)} ${c.hasS4?'<span class=\"badge ok\">S4</span>':''} <span class="mut">${c.mb}MB</span></button>`;
- const fileBtn=c=>`<button title="${esc(c.path)}" onclick="readSave('${esc(c.path)}',this)">${esc(c.name)} <span class="rgn" style="background:var(--acc)">${esc((c.format||'').toUpperCase())}</span>${c.writable?'':' <span class="badge ro">read-only</span>'}${pdir(c.path)?` <span class="mut">· ${esc(pdir(c.path))}/</span>`:''}</button>`;
+ // folder context: last two path segments before the filename ("Suikoden 3/Saves")
+ const pdir=p=>{const s=String(p).split(/[\\\\/]/).slice(0,-1);return s.slice(-2).join('/');};
+ const row=(c,extra)=>`<div class="pickrow" title="${esc(c.path)}" onclick="readSave('${esc(c.path)}',this)">
+    <span class="pname">${esc(c.name)}</span>
+    <span class="pdir">${esc(pdir(c.path))}/</span>
+    <span class="pbadges">${extra}</span>
+    <span class="psize">${c.mb}MB</span></div>`;
+ const cardRow=c=>row(c, c.hasS4?'<span class="badge ok">S4</span>':'<span class="badge ro">no S4</span>');
+ const fileRow=c=>row(c, `<span class="rgn" style="background:var(--acc)">${esc((c.format||'').toUpperCase())}</span>${c.writable?'':' <span class="badge ro">read-only</span>'}`);
  let h='';
- if(cards.length) h+='<div class="mut" style="margin:6px 0 2px">Memory cards</div><div class="row" style="margin:2px 0 8px">'+cards.map(cardBtn).join('')+'</div>';
- if(files.length) h+='<div class="mut" style="margin:6px 0 2px">Individual save files</div><div class="row" style="margin:2px 0 8px">'+files.map(fileBtn).join('')+'</div>';
+ if(cards.length) h+=`<div class="pickhead">Memory cards <span class="mut">(${cards.length})</span></div><div class="picklist">`+cards.map(cardRow).join('')+'</div>';
+ if(files.length) h+=`<div class="pickhead">Individual save files <span class="mut">(${files.length})</span></div><div class="picklist">`+files.map(fileRow).join('')+'</div>';
+ h=`<input type="search" class="pickfilter" placeholder="filter saves by name or folder…" oninput="filterPicks(this.value)">`+h;
  $('#cardlist').innerHTML=h;}
+function filterPicks(q){q=q.toLowerCase();
+ document.querySelectorAll('.pickrow').forEach(r=>{
+   r.style.display=r.title.toLowerCase().includes(q)?'':'none';});}
 let RUNE_LIST=[];   // [{id:int,name}] for rune dropdowns, built on read
 let ITEM_LIST=[];   // [{id:int,name}] for equipment dropdowns
 let ITEM_OPTS='';   // prebuilt <option> string (519 items) reused per slot
