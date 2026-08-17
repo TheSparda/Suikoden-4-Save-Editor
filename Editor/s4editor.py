@@ -565,6 +565,7 @@ function renderSaves(saves){
     <div class="seclabel">Names &amp; Money</div>
     <table class="nametbl"><tbody>${nameRows}
       <tr><td class="mut">Potch</td><td><input type="number" class="mono" min="0" max="99999999" value="${sv.potch||0}" data-save="${f}|potch" style="width:120px"></td></tr>
+      <tr><td class="mut">Game time</td><td><input type="number" class="mono" min="0" max="3596400" value="${sv.gameTimeSec||0}" data-save="${f}|gameTime" style="width:120px"> <span class="mut">seconds = ${Math.floor((sv.gameTimeSec||0)/3600)}h${String(Math.floor(((sv.gameTimeSec||0)%3600)/60)).padStart(2,'0')}m</span></td></tr>
       <tr><td class="mut">World map</td><td>${sv.worldMapPct!==undefined?sv.worldMapPct+'% explored':''}
         <label class="mut" style="margin-left:10px"><input type="checkbox" data-save="${f}|worldMapFull"> mark fully explored on write</label></td></tr>
     </tbody></table>

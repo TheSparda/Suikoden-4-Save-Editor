@@ -155,6 +155,10 @@ WORLDMAP_OFF, WORLDMAP_WORDS = 0xA950, 0x175
 # Potch (money) — u32 at gamedata 0x3698 (RAM 0x535EF8 - 0x532860). Verified: the pnach
 # max value 99,999,999 appears in a maxed save; same-moment .cbs/.sps pairs agree exactly.
 POTCH_OFF, POTCH_MAX = 0x3698, 99_999_999
+
+# Game time in seconds — u32 at gamedata 0x20 (body start). Verified: matches the H:MM
+# playtime in the save's icon.sys title exactly (e.g. 49783s = 13h49m = "013:49").
+GAMETIME_OFF = 0x20
 OFF_STATS   = 0x94              # u16[8]: STR SKL MAG EVA PDF MDF SPD LUK
 STAT_NAMES  = ["STR", "SKL", "MAG", "EVA", "PDF", "MDF", "SPD", "LUK"]
 # NOT exposed, and why:
@@ -453,6 +457,7 @@ def decode_save(gamedata):
         "digest": gamedata[DIGEST_OFF:DIGEST_OFF + DIGEST_LEN].hex(),
         "checksumValid": stored == calc,
         "potch": struct.unpack_from("<I", gamedata, POTCH_OFF)[0],
+        "gameTimeSec": struct.unpack_from("<I", gamedata, GAMETIME_OFF)[0],
         "worldMapPct": round(100 * sum(bin(w).count("1") for w in struct.unpack_from(
             f"<{WORLDMAP_WORDS}I", gamedata, WORLDMAP_OFF)) / (WORLDMAP_WORDS * 32), 1),
         "names": names,
@@ -476,6 +481,9 @@ def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None, save_edi
     changed = 0
     if save_edits and "potch" in save_edits:
         struct.pack_into("<I", b, POTCH_OFF, max(0, min(int(save_edits["potch"]), POTCH_MAX)))
+        changed += 1
+    if save_edits and "gameTime" in save_edits:
+        struct.pack_into("<I", b, GAMETIME_OFF, max(0, min(int(save_edits["gameTime"]), 999*3600)))
         changed += 1
     if save_edits and save_edits.get("worldMapFull"):
         # Mark the world map fully explored — the exact write the game's own cheat-table
