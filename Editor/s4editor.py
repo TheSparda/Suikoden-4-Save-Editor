@@ -331,6 +331,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .rgn{font-size:11px;font-weight:700;letter-spacing:.5px;padding:2px 7px;border-radius:999px;
  background:var(--acc2);color:#1a2a33;vertical-align:middle}
 .recsel{margin-left:auto;font-size:11px;padding:2px 6px;max-width:170px}
+input.unite{width:42px;padding:2px 4px;font-size:12px;margin-left:4px;vertical-align:middle}
 .charcard.unrec .recsel{background:#3a2b2b;color:#e79a9a;border-color:#6b4a4a}
 .charcard.unrec{opacity:.72}
 .charcard.unrec .charhead>span:first-child{color:var(--mut)}
@@ -528,7 +529,9 @@ function renderSaves(saves){
     return `<div class="charcard${unrec?' unrec':''}" data-name="${esc(c.name.toLowerCase())}" data-ri="${c.rosterIndex}" data-data="${c.hasData?1:0}">
       <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span>${recSel}</div>
       ${statTable}
-      <div class="seclabel">Runes</div>
+      <div class="seclabel">Runes <span class="mut" style="font-weight:400;text-transform:none;letter-spacing:0">&nbsp;·&nbsp; Unites (0–3):</span>
+        ${[0,1,2].map(s=>`<input type="number" class="unite" min="0" max="3" value="${(c.unites||[0,0,0])[s]||0}" data-ch="${cid}|unite:${s}" title="Unite attack slot ${s+1} level (0 = locked)">`).join('')}
+      </div>
       <div class="grid g3">${rune(0,'Rune 1')}${rune(1,'Rune 2')}${rune(2,'Rune 3')}</div>
       <div class="seclabel">Equipment</div>
       <div class="grid g4">${EQUIP_SLOTS.map(([k])=>gear(k,GEAR_LABELS[k]||k)).join('')}</div>
@@ -553,6 +556,8 @@ function renderSaves(saves){
     <div class="seclabel">Names &amp; Money</div>
     <table class="nametbl"><tbody>${nameRows}
       <tr><td class="mut">Potch</td><td><input type="number" class="mono" min="0" max="99999999" value="${sv.potch||0}" data-save="${f}|potch" style="width:120px"></td></tr>
+      <tr><td class="mut">World map</td><td>${sv.worldMapPct!==undefined?sv.worldMapPct+'% explored':''}
+        <label class="mut" style="margin-left:10px"><input type="checkbox" data-save="${f}|worldMapFull"> mark fully explored on write</label></td></tr>
     </tbody></table>
     <div class="seclabel" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Characters
       <input type="search" placeholder="filter by name or #…" oninput="filterChars('${f}',this.value)" style="width:200px;font-weight:400">
@@ -594,12 +599,15 @@ async function writeSave(folder,btn){
    if(field.startsWith('stat:')){charEdits[ridx].stats=charEdits[ridx].stats||{};charEdits[ridx].stats[field.slice(5)]=+el.value;}
    else if(field.startsWith('rune:')){charEdits[ridx].runes=charEdits[ridx].runes||{};charEdits[ridx].runes[field.slice(5)]=+el.value;}
    else if(field.startsWith('equip:')){charEdits[ridx].equip=charEdits[ridx].equip||{};charEdits[ridx].equip[field.slice(6)]=+el.value;}
+   else if(field.startsWith('unite:')){charEdits[ridx].unites=charEdits[ridx].unites||{};charEdits[ridx].unites[field.slice(6)]=+el.value;}
    else charEdits[ridx][field]=+el.value;}
  for(const el of document.querySelectorAll(`[data-name^="${folder}|"]`)){
    const key=el.dataset.name.split('|')[1];nameEdits[key]=el.value;}
  const saveEdits={};
  for(const el of document.querySelectorAll(`[data-save^="${folder}|"]`)){
-   const key=el.dataset.save.split('|')[1];saveEdits[key]=+el.value;}
+   const key=el.dataset.save.split('|')[1];
+   const v=el.type==='checkbox'?(el.checked?1:0):+el.value;
+   if(el.type!=='checkbox'||v)saveEdits[key]=v;}   // only send checkbox actions when ticked
  const bakEl=document.querySelector(`#chars-${CSS.escape(folder)}`)?.closest('.savecard')?.querySelector('.bak');
  const backup=bakEl?bakEl.checked:true;
  const r=await withBusy(btn,()=>api('/api/save-write',{path:cardPath,folder,charEdits,nameEdits,saveEdits,backup}));

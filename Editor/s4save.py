@@ -133,6 +133,15 @@ RECRUIT_STATES = {0: "Not Recruited", 1: "In Your Company", 10: "Recruited",
 PROG_BASE, PROG_STRIDE = 0x108, 0x78
 OFF_PROG_EXP, OFF_PROG_WLVL = 0x00, 0x04
 EXP_MAX, WLVL_MAX = 98999, 15
+# Unite-attack levels: up to three u8 slots per character at P+0x65/+0x67/+0x69 (0=locked,
+# 1..3 = unite level; the CT names them per character, e.g. Lino's "Family Attack" at
+# P[1]+0x65). Verified: never exceeds 3 in any record across 8 saves.
+OFF_PROG_UNITES, UNITE_MAX = (0x65, 0x67, 0x69), 3
+
+# World-map exploration flags — 0x175 (373) u32s at gamedata 0xA950 (RAM 0x53D1B0).
+# Confirmed: saves where the CT's "World Map Fully Explored" cheat was used hold exactly
+# 0xFFFFFFFF in every word; normal saves show a growing scatter of bits.
+WORLDMAP_OFF, WORLDMAP_WORDS = 0xA950, 0x175
 
 # Potch (money) — u32 at gamedata 0x3698 (RAM 0x535EF8 - 0x532860). Verified: the pnach
 # max value 99,999,999 appears in a maxed save; same-moment .cbs/.sps pairs agree exactly.
@@ -398,6 +407,7 @@ def decode_character(gamedata, roster_index):
         "recruitedName": RECRUIT_STATES.get(recruited, f"? ({recruited})"),
         "exp": struct.unpack_from("<I", gamedata, prog + OFF_PROG_EXP)[0],
         "weaponLvl": gamedata[prog + OFF_PROG_WLVL],
+        "unites": [gamedata[prog + o] for o in OFF_PROG_UNITES],
         "rosterIndex": roster_index,
         "name": CHAR_NAMES.get(roster_index, f"#{roster_index}"),
         "addr": off,
@@ -433,6 +443,8 @@ def decode_save(gamedata):
         "digest": gamedata[DIGEST_OFF:DIGEST_OFF + DIGEST_LEN].hex(),
         "checksumValid": stored == calc,
         "potch": struct.unpack_from("<I", gamedata, POTCH_OFF)[0],
+        "worldMapPct": round(100 * sum(bin(w).count("1") for w in struct.unpack_from(
+            f"<{WORLDMAP_WORDS}I", gamedata, WORLDMAP_OFF)) / (WORLDMAP_WORDS * 32), 1),
         "names": names,
         "characters": [c for c in decode_characters(gamedata) if c["hasData"]],
         "writable": True,
@@ -454,6 +466,12 @@ def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None, save_edi
     changed = 0
     if save_edits and "potch" in save_edits:
         struct.pack_into("<I", b, POTCH_OFF, max(0, min(int(save_edits["potch"]), POTCH_MAX)))
+        changed += 1
+    if save_edits and save_edits.get("worldMapFull"):
+        # Mark the world map fully explored — the exact write the game's own cheat-table
+        # helper performs (0xFFFFFFFF into each of the 373 flag words).
+        for k in range(WORLDMAP_WORDS):
+            struct.pack_into("<I", b, WORLDMAP_OFF + 4 * k, 0xFFFFFFFF)
         changed += 1
     name_off = {k: (o, n) for k, o, n, _ in NAME_FIELDS}
     for key, val in (name_edits or {}).items():
@@ -486,6 +504,12 @@ def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None, save_edi
                     if sname in EQUIP_OFF:
                         struct.pack_into("<H", b, base + EQUIP_OFF[sname], _clamp(iid, 2))
                         changed += 1
+            elif k == "unites":
+                for slot, lvl in (v or {}).items():
+                    slot = int(slot)
+                    if 0 <= slot < len(OFF_PROG_UNITES):
+                        b[PROG_BASE + int(ridx) * PROG_STRIDE + OFF_PROG_UNITES[slot]] = \
+                            max(0, min(int(lvl), UNITE_MAX)); changed += 1
             elif k == "exp":
                 struct.pack_into("<I", b, PROG_BASE + int(ridx) * PROG_STRIDE + OFF_PROG_EXP,
                                  max(0, min(int(v), EXP_MAX))); changed += 1

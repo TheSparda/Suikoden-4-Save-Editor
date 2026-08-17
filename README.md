@@ -32,10 +32,12 @@ checksum are identical across regions, and each save is labelled with its region
 - **Full per-character editing** for every unit:
   - **Recruitment status** — a real per-character flag (Not Recruited / In Your Company /
     Recruited / In Party / Permanently In Party), the same byte the game itself checks
+  - **EXP** (level derives from it) and **weapon level** (1–15)
   - **Max HP** and all eight stats — STR, SKL, MAG, EVA, PDF, MDF, SPD, LUK
-  - **Three rune slots** (full rune list)
+  - **Three rune slots** (full rune list) and **unite-attack levels** (0–3)
   - **Seven equipment slots** — head, body, hands, feet, and three accessories
-  - Plus the **hero name** and **ship name**
+  - Plus the **hero name**, **ship name**, **potch (money)**, and a one-click
+    **"world map fully explored"** toggle
 
 - **Safe writes.** On save the app recomputes the gamedata checksum (CRC32 + byte-reversed
   MD5), refreshes each memory-card page's Hamming ECC, and for single-file containers
