@@ -204,7 +204,8 @@ class Handler(BaseHTTPRequestHandler):
                 ce = {int(k): v for k, v in (b.get("charEdits") or {}).items()}
                 res = SV.write_save_edits(path, folder, char_edits=ce,
                                           name_edits=b.get("nameEdits") or {},
-                                          make_backup=b.get("backup", True))
+                                          make_backup=b.get("backup", True),
+                                          save_edits=b.get("saveEdits") or {})
                 if res.get("ok"):
                     res["saves"] = SV.read_all_s4_saves(path)
                 return self._send(200, res)
@@ -480,7 +481,9 @@ function renderSaves(saves){
     const st=c.stats, cid=esc(sv.folder)+'|'+c.rosterIndex;
     const cell=(f,v,mx)=>`<input type="number" min="0" max="${mx}" value="${v}" data-ch="${cid}|${f}">`;
     const statTable=`<div class="tablewrap"><table class="savetbl"><thead><tr>`+
-      `<th>Max HP</th>${STATS.map(k=>`<th>${k}</th>`).join('')}</tr></thead><tbody><tr>`+
+      `<th>EXP</th><th>Wpn Lv</th><th>Max HP</th>${STATS.map(k=>`<th>${k}</th>`).join('')}</tr></thead><tbody><tr>`+
+      `<td>${cell('exp',c.exp||0,98999)}</td>`+
+      `<td>${cell('weaponLvl',c.weaponLvl||0,15)}</td>`+
       `<td>${cell('maxHP',c.maxHP,9999)}</td>`+
       STATS.map(k=>`<td>${cell('stat:'+k,st[k],999)}</td>`).join('')+`</tr></tbody></table></div>`;
     const rune=(slot,label)=>{
@@ -524,8 +527,10 @@ function renderSaves(saves){
            <button class="pri" onclick="event.stopPropagation();writeSave('${f}',this)">Write ${esc(sv.label)}</button>`}
     </div>
     <div class="savebody">
-    <div class="seclabel">Names</div>
-    <table class="nametbl"><tbody>${nameRows}</tbody></table>
+    <div class="seclabel">Names &amp; Money</div>
+    <table class="nametbl"><tbody>${nameRows}
+      <tr><td class="mut">Potch</td><td><input type="number" class="mono" min="0" max="99999999" value="${sv.potch||0}" data-save="${f}|potch" style="width:120px"></td></tr>
+    </tbody></table>
     <div class="seclabel" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Characters
       <input type="search" placeholder="filter by name or #…" oninput="filterChars('${f}',this.value)" style="width:200px;font-weight:400">
       <label class="mut" style="font-weight:400"><input type="checkbox" onchange="withdataChars('${f}',this.checked)"> only non-default</label>
@@ -569,9 +574,12 @@ async function writeSave(folder,btn){
    else charEdits[ridx][field]=+el.value;}
  for(const el of document.querySelectorAll(`[data-name^="${folder}|"]`)){
    const key=el.dataset.name.split('|')[1];nameEdits[key]=el.value;}
+ const saveEdits={};
+ for(const el of document.querySelectorAll(`[data-save^="${folder}|"]`)){
+   const key=el.dataset.save.split('|')[1];saveEdits[key]=+el.value;}
  const bakEl=document.querySelector(`#chars-${CSS.escape(folder)}`)?.closest('.savecard')?.querySelector('.bak');
  const backup=bakEl?bakEl.checked:true;
- const r=await withBusy(btn,()=>api('/api/save-write',{path:cardPath,folder,charEdits,nameEdits,backup}));
+ const r=await withBusy(btn,()=>api('/api/save-write',{path:cardPath,folder,charEdits,nameEdits,saveEdits,backup}));
  if(r.error)return alert('Write failed: '+r.error);
  alert(`Wrote ${folder}: ${r.changed} field(s) changed. Checksum recomputed — save will load normally.`);
  if(r.saves)renderSaves(r.saves);}

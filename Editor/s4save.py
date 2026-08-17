@@ -124,16 +124,26 @@ RECRUIT_BASE   = 0x164
 RECRUIT_STRIDE = 0x78
 RECRUIT_STATES = {0: "Not Recruited", 1: "In Your Company", 10: "Recruited",
                   11: "In Party", 15: "Permanently In Party"}
+
+# Progression record — same 0x78-stride family as the recruit byte (recruited = +0x5C):
+#   P[i] = 0x108 + i*0x78:  +0x00 u32 EXP (game cap 98999 — the pnach "Max EXP" value,
+#   and what a LVL99 hero carries), +0x04 u8 weapon level (1..15).
+# Verified across 8 saves: EXP never exceeds the cap in any of 904 records; weapon level
+# never exceeds 15; hero EXP matches the on-screen level in save titles.
+PROG_BASE, PROG_STRIDE = 0x108, 0x78
+OFF_PROG_EXP, OFF_PROG_WLVL = 0x00, 0x04
+EXP_MAX, WLVL_MAX = 98999, 15
+
+# Potch (money) — u32 at gamedata 0x3698 (RAM 0x535EF8 - 0x532860). Verified: the pnach
+# max value 99,999,999 appears in a maxed save; same-moment .cbs/.sps pairs agree exactly.
+POTCH_OFF, POTCH_MAX = 0x3698, 99_999_999
 OFF_STATS   = 0x94              # u16[8]: STR SKL MAG EVA PDF MDF SPD LUK
 STAT_NAMES  = ["STR", "SKL", "MAG", "EVA", "PDF", "MDF", "SPD", "LUK"]
 # NOT exposed, and why:
 #  * Current HP is not persisted in the record — the game restores it to Max HP on load,
 #    so every saved value reads 0. There is nothing meaningful to edit.
-#  * Level is DERIVED from experience (Suikoden computes it), so there is no level byte to
-#    set; changing a character's level means changing their EXP.
-#  * The EXP field within the save has not been confirmed to the standard this tool holds
-#    (candidates don't track level cleanly across two playthroughs), so it is left alone
-#    rather than exposed as a guess that could corrupt a save.
+#  * Level is DERIVED from experience (no level byte exists); edit EXP instead (see
+#    PROG_BASE above — EXP editing IS exposed).
 # Equipment slots (u16 item ids), offsets RELATIVE TO THE RECORD BASE. Verified by category
 # purity: across all recruited characters in two independent playthroughs, +0xBE holds only
 # armor/robes and +0xC2 only boots/shoes (100% pure); head/hands/accessory slots likewise
@@ -382,9 +392,12 @@ def decode_character(gamedata, roster_index):
     equip = {name: struct.unpack_from("<H", gamedata, off + eo)[0]
              for name, eo in EQUIP_SLOTS}
     recruited = gamedata[RECRUIT_BASE + roster_index * RECRUIT_STRIDE]
+    prog = PROG_BASE + roster_index * PROG_STRIDE
     return {
         "recruited": recruited,
         "recruitedName": RECRUIT_STATES.get(recruited, f"? ({recruited})"),
+        "exp": struct.unpack_from("<I", gamedata, prog + OFF_PROG_EXP)[0],
+        "weaponLvl": gamedata[prog + OFF_PROG_WLVL],
         "rosterIndex": roster_index,
         "name": CHAR_NAMES.get(roster_index, f"#{roster_index}"),
         "addr": off,
@@ -419,6 +432,7 @@ def decode_save(gamedata):
         "slot": struct.unpack_from("<H", gamedata, OFF_SLOT)[0],
         "digest": gamedata[DIGEST_OFF:DIGEST_OFF + DIGEST_LEN].hex(),
         "checksumValid": stored == calc,
+        "potch": struct.unpack_from("<I", gamedata, POTCH_OFF)[0],
         "names": names,
         "characters": [c for c in decode_characters(gamedata) if c["hasData"]],
         "writable": True,
@@ -432,11 +446,15 @@ STAT_INDEX = {n: i for i, n in enumerate(STAT_NAMES)}
 def _clamp(v, width):
     return max(0, min((1 << (8 * width)) - 1, int(v)))
 
-def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None):
+def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None, save_edits=None):
     """char_edits: {rosterIndex: {field: value, "stats": {STAT: value}}}.
-    name_edits:   {nameKey: "text"}.  Returns (new_gamedata_with_fixed_checksums, changed)."""
+    name_edits:   {nameKey: "text"}.  save_edits: {"potch": int}.
+    Returns (new_gamedata_with_fixed_checksums, changed)."""
     b = bytearray(gamedata)
     changed = 0
+    if save_edits and "potch" in save_edits:
+        struct.pack_into("<I", b, POTCH_OFF, max(0, min(int(save_edits["potch"]), POTCH_MAX)))
+        changed += 1
     name_off = {k: (o, n) for k, o, n, _ in NAME_FIELDS}
     for key, val in (name_edits or {}).items():
         if key not in name_off:
@@ -468,6 +486,12 @@ def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None):
                     if sname in EQUIP_OFF:
                         struct.pack_into("<H", b, base + EQUIP_OFF[sname], _clamp(iid, 2))
                         changed += 1
+            elif k == "exp":
+                struct.pack_into("<I", b, PROG_BASE + int(ridx) * PROG_STRIDE + OFF_PROG_EXP,
+                                 max(0, min(int(v), EXP_MAX))); changed += 1
+            elif k == "weaponLvl":
+                b[PROG_BASE + int(ridx) * PROG_STRIDE + OFF_PROG_WLVL] = max(0, min(int(v), WLVL_MAX))
+                changed += 1
             elif k == "recruited":
                 # Recruitment byte lives OUTSIDE the 0xF0 record, at 0x164 + idx*0x78.
                 # Only the game's own enum values are accepted; anything else is refused
@@ -482,7 +506,8 @@ def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None):
     return recompute_checksums(bytes(b)), changed
 
 
-def write_save_edits(path, folder, char_edits=None, name_edits=None, make_backup=True):
+def write_save_edits(path, folder, char_edits=None, name_edits=None, make_backup=True,
+                     save_edits=None):
     """Apply edits to one save's gamedata, in place. On a memcard this rebuilds the
     checksums + per-page ECC; on an exported save file it re-packs the container.
     Backs up the file first by default."""
@@ -492,7 +517,8 @@ def write_save_edits(path, folder, char_edits=None, name_edits=None, make_backup
             return {"error": info["error"]}
         if not info.get("writable"):
             return {"error": info.get("note") or f"{info['format']} files are read-only"}
-        new_gd, changed = apply_edits_to_gamedata(info["gamedata"], char_edits, name_edits)
+        new_gd, changed = apply_edits_to_gamedata(info["gamedata"], char_edits, name_edits,
+                                                  save_edits)
         if changed == 0:
             return {"ok": True, "changed": 0, "note": "no editable fields in request"}
         try:
@@ -511,7 +537,7 @@ def write_save_edits(path, folder, char_edits=None, name_edits=None, make_backup
     gd = card.read_file(target["cluster"], target["length"], folder)
     if gd is None:
         return {"error": "gamedata not found"}
-    new_gd, changed = apply_edits_to_gamedata(gd, char_edits, name_edits)
+    new_gd, changed = apply_edits_to_gamedata(gd, char_edits, name_edits, save_edits)
     if changed == 0:
         return {"ok": True, "changed": 0, "note": "no editable fields in request"}
     if make_backup:
