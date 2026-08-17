@@ -110,6 +110,20 @@ RUNE_SLOTS  = 3
 # stat sub-block, offsets RELATIVE TO THE RECORD BASE. Max HP (+0x92) and the 8 stats
 # (+0x94..) are confirmed against known values across two playthroughs.
 OFF_MAXHP   = 0x92              # u16 max HP
+
+# Recruitment status array — one byte per roster index, OUTSIDE the 0xF0 record frame:
+#   addr = 0x164 + rosterIndex * 0x78
+# Values (decimal, from the community Cheat Engine table's live-RAM "Recruited" entries;
+# the save body is a verbatim image of the game's static gamedata block at EE 0x532860,
+# so RAM addr - 0x532860 = save offset):
+#   0 = Not Recruited, 1 = In Your Company (guest), 10 = Recruited,
+#   11 = In Party, 15 = Permanently In Party (hero)
+# Verified across 8 saves (NTSC + PAL): values are enum-pure, counts track story
+# progression, and decoding 11/15 as "party" reproduces story-accurate party lists.
+RECRUIT_BASE   = 0x164
+RECRUIT_STRIDE = 0x78
+RECRUIT_STATES = {0: "Not Recruited", 1: "In Your Company", 10: "Recruited",
+                  11: "In Party", 15: "Permanently In Party"}
 OFF_STATS   = 0x94              # u16[8]: STR SKL MAG EVA PDF MDF SPD LUK
 STAT_NAMES  = ["STR", "SKL", "MAG", "EVA", "PDF", "MDF", "SPD", "LUK"]
 # NOT exposed, and why:
@@ -367,7 +381,10 @@ def decode_character(gamedata, roster_index):
     runes = [gamedata[off + ro] for ro in OFF_RUNES]   # low byte of each rune slot
     equip = {name: struct.unpack_from("<H", gamedata, off + eo)[0]
              for name, eo in EQUIP_SLOTS}
+    recruited = gamedata[RECRUIT_BASE + roster_index * RECRUIT_STRIDE]
     return {
+        "recruited": recruited,
+        "recruitedName": RECRUIT_STATES.get(recruited, f"? ({recruited})"),
         "rosterIndex": roster_index,
         "name": CHAR_NAMES.get(roster_index, f"#{roster_index}"),
         "addr": off,
@@ -451,6 +468,13 @@ def apply_edits_to_gamedata(gamedata, char_edits=None, name_edits=None):
                     if sname in EQUIP_OFF:
                         struct.pack_into("<H", b, base + EQUIP_OFF[sname], _clamp(iid, 2))
                         changed += 1
+            elif k == "recruited":
+                # Recruitment byte lives OUTSIDE the 0xF0 record, at 0x164 + idx*0x78.
+                # Only the game's own enum values are accepted; anything else is refused
+                # rather than written blind.
+                if int(v) in RECRUIT_STATES:
+                    b[RECRUIT_BASE + int(ridx) * RECRUIT_STRIDE] = int(v)
+                    changed += 1
             elif k in CHAR_FIELDS:
                 off, w = CHAR_FIELDS[k]
                 struct.pack_into({1:"<B",2:"<H",4:"<I"}[w], b, base + off, _clamp(v, w))

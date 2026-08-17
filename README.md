@@ -29,7 +29,9 @@ checksum are identical across regions, and each save is labelled with its region
   it to a memory card or `.psu`/`.cbs` first. (`.max` uses lzari compression and isn't read
   yet.)
 
-- **Full per-character editing** for every recruited unit:
+- **Full per-character editing** for every unit:
+  - **Recruitment status** — a real per-character flag (Not Recruited / In Your Company /
+    Recruited / In Party / Permanently In Party), the same byte the game itself checks
   - **Max HP** and all eight stats — STR, SKL, MAG, EVA, PDF, MDF, SPD, LUK
   - **Three rune slots** (full rune list)
   - **Seven equipment slots** — head, body, hands, feet, and three accessories
@@ -42,8 +44,8 @@ checksum are identical across regions, and each save is labelled with its region
 
 - **Quality-of-life UI.** Auto-scan for nearby saves, native file picker, **NTSC-U / PAL**
   badges, a live **checksum-ok** indicator, **collapsible** save cards when a card holds
-  several slots, a sticky **Write** bar, per-save name/# filtering, and clear **"not
-  recruited"** markers on placeholder units (a unit the game hasn't given real stats yet).
+  several slots, a sticky **Write** bar, per-save name/# filtering, and a per-character
+  **recruitment dropdown** (unrecruited units render dimmed).
 
 - **Reference tab** — browsable database: 113 characters, 519 items, 42 runes, and the full
   character-record layout.
@@ -75,9 +77,9 @@ Then open the printed `http://127.0.0.1:8749`.
 3. Click **Write**. A backup is made, the checksum + ECC are rebuilt, and the save reloads
    to confirm.
 
-> Editing an unrecruited placeholder unit won't recruit it — recruitment is tracked by a
-> separate in-game flag, not by the character's stat record. Such units are marked
-> **"not recruited."**
+> To recruit a unit, set its **Recruitment** dropdown (e.g. to "Recruited") and Write —
+> this flips the same flag the game checks. Note that story-gated content tied to specific
+> plot beats remains governed by separate event state.
 
 ---
 
@@ -96,6 +98,12 @@ index. Runes at `+0x00/+0x02/+0x04`; a stat sub-block at `+0x74` (EXP, Max HP, t
 stats); equipment at `+0xBC…+0xC8`. Anchored with known facts (Hero = Rune of Punishment,
 Ted = Soul Eater) across independent playthroughs.
 
+**Recruitment flag — solved.** MIPS disassembly showed the save gamedata is a verbatim
+image of the game's state block at EE `0x532860`, which let the community cheat table's
+live "Recruited" byte be mapped straight into the save: one byte per character at
+`0x164 + rosterIndex*0x78` (0 Not Recruited / 1 In Your Company / 10 Recruited /
+11 In Party / 15 Permanently In Party). Verified across NTSC-U and PAL saves.
+
 **Single-file containers.** The 57,952-byte payload is located by *self-validation* — the
 one window whose internal CRC/MD5 checks out — which is format-agnostic for uncompressed
 containers; CodeBreaker files are RC4+zlib-decoded first.
@@ -104,15 +112,12 @@ Full notes: `Editor/Suikoden4_offsets.md`.
 
 ## What's deferred (and why)
 
-- **A "recruited" toggle.** Recruitment isn't stored in the character record, and the save's
-  recruit flag couldn't be isolated cleanly from sample saves without a controlled
-  single-recruit diff. Rather than write a guessed flag, it's left out.
 - **New-game / ISO stat editing.** The record *shape* is known, but the initial-stats table
   that seeds a new game is packed inside `FILEDATA.*` and hasn't been located. The hex
   explorer exists to help find it.
 - **Spell / unite parameter tables** — packed game data, not yet located.
-- **`.sps` / `.psv` write and `.max` support** — container integrity/compression not
-  reconstructed yet.
+- **`.psv` write and `.max` support** — the PS3 signature needs Sony's key, and MAX Drive
+  uses lzari compression not implemented yet.
 
 ---
 

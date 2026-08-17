@@ -316,9 +316,9 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .savebar b{font-size:15px;color:var(--acc)}
 .rgn{font-size:11px;font-weight:700;letter-spacing:.5px;padding:2px 7px;border-radius:999px;
  background:var(--acc2);color:#1a2a33;vertical-align:middle}
-.nrec{margin-left:auto;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
- padding:2px 7px;border-radius:999px;background:#3a2b2b;color:#e79a9a;border:1px solid #6b4a4a}
-.charcard.unrec{opacity:.62}
+.recsel{margin-left:auto;font-size:11px;padding:2px 6px;max-width:170px}
+.charcard.unrec .recsel{background:#3a2b2b;color:#e79a9a;border-color:#6b4a4a}
+.charcard.unrec{opacity:.72}
 .charcard.unrec .charhead>span:first-child{color:var(--mut)}
 .nametbl{width:auto}.nametbl td{border:0;padding:3px 10px 3px 0}
 .charcard{border:1px solid var(--line);border-radius:10px;padding:12px 14px;
@@ -491,13 +491,16 @@ function renderSaves(saves){
       const cur=(c.equip||{})[key]||0;
       const opts=ITEM_OPTS.replace(`value="${cur}">`,`value="${cur}" selected>`);
       return `<div class="fld"><label>${label}</label><select data-ch="${cid}|equip:${key}">${opts}</select></div>`;};
-    // Unrecruited units carry a placeholder record: maxHP is 0 or 10. Stats, runes and
-    // equipment can all hold leftover seed garbage (e.g. Mao's stray rune, a stray PDF of
-    // 4/18/25), so maxHP is the only reliable signal — a real recruited unit is always
-    // well above 10 HP.
-    const unrec=(c.maxHP||0)<=10;
+    // Real recruitment flag from the save (0x164 + idx*0x78):
+    // 0=Not Recruited, 1=In Your Company, 10=Recruited, 11=In Party, 15=Permanently In Party
+    const REC_STATES=[[0,'Not Recruited'],[1,'In Your Company'],[10,'Recruited'],[11,'In Party'],[15,'Permanently In Party']];
+    const rcur=(c.recruited===undefined)?null:c.recruited;
+    const unrec=rcur!==null && rcur===0;
+    const recSel=rcur===null?'':`<select class="recsel" data-ch="${cid}|recruited" onclick="event.stopPropagation()" title="Recruitment status — this is the flag the game itself checks">${
+      REC_STATES.map(([v,l])=>`<option value="${v}"${v===rcur?' selected':''}>${l}</option>`).join('')
+    }${REC_STATES.some(([v])=>v===rcur)?'':`<option value="${rcur}" selected>? (${rcur})</option>`}</select>`;
     return `<div class="charcard${unrec?' unrec':''}" data-name="${esc(c.name.toLowerCase())}" data-ri="${c.rosterIndex}" data-data="${c.hasData?1:0}">
-      <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span>${unrec?'<span class="nrec" title="Placeholder record — this unit is not recruited in this save, so the game stores maxHP 10 and zero stats. Editing it will not recruit them.">not recruited</span>':''}</div>
+      <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span>${recSel}</div>
       ${statTable}
       <div class="seclabel">Runes</div>
       <div class="grid g3">${rune(0,'Rune 1')}${rune(1,'Rune 2')}${rune(2,'Rune 3')}</div>
@@ -506,7 +509,7 @@ function renderSaves(saves){
     </div>`;};
   const chars=(sv.characters||[]).map(charCard).join('');
   const f=esc(sv.folder);
-  const nrec=(sv.characters||[]).filter(c=>(c.maxHP||0)>10).length;
+  const nrec=(sv.characters||[]).filter(c=>(c.recruited||0)>=10).length;
   return `<div class="card savecard${many?' collapsed':''}">
     <div class="savebar" onclick="toggleSave('${f}',event)" title="click to expand / collapse">
       <span class="caret">▸</span>

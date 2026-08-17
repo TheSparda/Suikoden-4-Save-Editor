@@ -179,7 +179,32 @@ holds character/item/spell tables are not yet mapped. Editing needs: identify th
 entry, decompress it, edit, recompress, fix offsets/sizes. Deferred — big effort, and the
 save editor already covers character/rune/equipment editing for existing playthroughs.
 
-## Recruitment flags — NOT reliably located (investigated in depth)
+## Recruitment flags — CRACKED (write-enabled)
+**Recruited[i] = gamedata `0x164 + rosterIndex*0x78` (one byte per character).**
+Values (decimal): `0` Not Recruited · `1` In Your Company (guest) · `10` Recruited ·
+`11` In Party · `15` Permanently In Party (hero).
+
+How it fell: a newer community Cheat Engine table ("Suikoden IV (USA).ct") exposes a live
+per-character "Recruited" byte in RAM. MIPS disassembly of `SLUS_209.79` then showed the
+function pair at `0x468710/0x468720` returning a **static pointer `0x532860` and size
+`0xE260`** — i.e. the save gamedata is a **verbatim image of the game's state block at EE
+`0x532860`**, so every RAM address maps linearly to a save offset (`save = ram - 0x532860`;
+the CT's Recruited `0x5329C4` → save `0x164`). The CT dropdown values are decimal (15 =
+0xF "Permanently In Party"), which the hero byte confirms in every save.
+
+The array is indexed by our roster index but with **stride 0x78** — it threads through the
+0xF0 character records' unclaimed bytes (`+0x70`/`+0xE8`), which is why per-record scans
+never found it. Verified on 8 saves (NTSC-U + PAL): all values enum-pure, recruited counts
+track story progression (4 → 62 → 107), and decoding `11/15` as "party" reproduces
+story-accurate party lists (e.g. the canonical early party Hero/Chiepoo/Paula/Jewel).
+Note: unrecruited-but-statted records (the new-game seed) plus guests (`1`) explain every
+earlier heuristic mismatch — non-combat stars recruit with placeholder battle records.
+
+The editor exposes this as a per-character dropdown; only the five known enum values are
+writable. Caveat: setting `10` marks a unit recruited exactly as the game tracks it, but
+story-gated availability (e.g. HQ facilities tied to plot beats) is separate state.
+
+## (superseded) earlier investigation notes
 Recruitment is **not** stored inside the 0xF0 character record (every record offset was
 checked across a controlled same-playthrough pair; none flips on recruit).
 
