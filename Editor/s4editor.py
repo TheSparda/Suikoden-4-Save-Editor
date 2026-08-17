@@ -506,8 +506,13 @@ function renderSaves(saves){
   const charCard=(c)=>{
     const st=c.stats, cid=esc(sv.folder)+'|'+c.rosterIndex;
     const cell=(f,v,mx)=>`<input type="number" min="0" max="${mx}" value="${v}" data-ch="${cid}|${f}">`;
+    // Level is derived: lvl = EXP//1000 + 1 (verified against the save-title level in
+    // every sample). The Lv input just drives the EXP field; only EXP is written.
+    const lv=Math.min(99,Math.floor((c.exp||0)/1000)+1);
     const statTable=`<div class="tablewrap"><table class="savetbl"><thead><tr>`+
-      `<th>EXP</th><th>Wpn Lv</th><th>Max HP</th>${STATS.map(k=>`<th>${k}</th>`).join('')}</tr></thead><tbody><tr>`+
+      `<th>Lv</th><th>EXP</th><th>Wpn Lv</th><th>Max HP</th>${STATS.map(k=>`<th>${k}</th>`).join('')}</tr></thead><tbody><tr>`+
+      `<td><input type="number" min="1" max="99" value="${lv}" title="Level (writes EXP = (Lv−1)×1000)"
+         oninput="const e=this.closest('tr').querySelector('[data-ch$=&quot;|exp&quot;]');if(e&&this.value)e.value=(Math.min(99,Math.max(1,+this.value))-1)*1000;"></td>`+
       `<td>${cell('exp',c.exp||0,98999)}</td>`+
       `<td>${cell('weaponLvl',c.weaponLvl||0,15)}</td>`+
       `<td>${cell('maxHP',c.maxHP,9999)}</td>`+

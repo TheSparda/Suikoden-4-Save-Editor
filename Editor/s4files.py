@@ -11,7 +11,8 @@ individual exported-save formats people trade online, extracting the 57952-byte 
   * .sps  SharkPort / X-Port — raw + a trailing checksum.  READ + WRITE (checksum
                                                             reverse-engineered + verified)
   * .psv  PS3 export — HMAC-SHA1 signed.                    READ only (Sony signature)
-  * .max  MAX Drive — lzari-compressed.                    UNSUPPORTED (no lzari)
+  * .max  MAX Drive — lzari-compressed.                    READ only (decoder ported
+                                                            from mymc; no re-encoder)
 
 The payload is located by self-validation: the S4 gamedata carries its own CRC32 +
 byte-reversed MD5 (see s4save), so the correct 57952-byte window is the one whose digest
@@ -21,6 +22,7 @@ Nothing is written unless the re-packed file decodes back to the exact edited pa
 RC4 S-box is the public-domain CodeBreaker constant from mymc (Ross Ridge).
 """
 import struct, os, zlib, hashlib, shutil
+import s4lzari   # LZARI decoder (ported from mymc) for MAX Drive saves
 
 SINGLE_EXTS = (".cbs", ".sps", ".psu", ".max", ".psv")
 S4_PREFIXES = (b"BASLUS-20979", b"BESLES-52913")
@@ -131,7 +133,19 @@ def extract(blob):
     if fmt is None:
         return {"error": "unrecognized save file (no S4 payload found)"}
     if fmt == "max":
-        return {"error": "MAX Drive (.max) uses lzari compression, not supported yet"}
+        # Header (per mymc): magic 12s, cksum u32, dirname 32s, iconsys 32s,
+        # clen u32 (compressed size + 4), dirlen u32, length u32 (decompressed size).
+        try:
+            _, _, dirname, _, clen, _, length = struct.unpack_from("<12sL32s32sLLL", blob, 0)
+            dec = s4lzari.decode(blob[92:92 + clen - 4], length)
+        except Exception as e:
+            return {"error": f"MAX decode failed: {e}"}
+        o = _find_payload(dec)
+        if o < 0:
+            return {"error": "no valid S4 payload in MAX archive"}
+        return {"format": "max", "folder": _folder_of(dec),
+                "gamedata": dec[o:o + GD_LEN], "writable": False,
+                "note": "MAX Drive is read-only (lzari re-encoding not implemented)"}
     if fmt == "cbs":
         try:
             _, _, inner = _cbs_inner(blob)

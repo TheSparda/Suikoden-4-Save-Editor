@@ -22,12 +22,12 @@ checksum are identical across regions, and each save is labelled with its region
   | EMS / uLaunchELF | `.psu` | ✅ | ✅ |
   | SharkPort / X-Port | `.sps` | ✅ | ✅ |
   | PS3 export (signed) | `.psv` | ✅ | read-only\* |
-  | MAX Drive | `.max` | — | — (lzari) |
+  | MAX Drive | `.max` | ✅ | read-only\* |
 
   \* `.psv` is a PS3 export signed with an HMAC-SHA1 signature; it's viewable/editable in
   the UI but not written back, since re-signing needs Sony's key. To edit a `.psv`, convert
-  it to a memory card or `.psu`/`.cbs` first. (`.max` uses lzari compression and isn't read
-  yet.)
+  it to a memory card or `.psu`/`.cbs` first. `.max` is readable (LZARI decoder ported from
+  mymc) but not re-encoded, so it's read-only too.
 
 - **Full per-character editing** for every unit:
   - **Recruitment status** — a real per-character flag (Not Recruited / In Your Company /
@@ -118,8 +118,8 @@ Full notes: `Editor/Suikoden4_offsets.md`.
   that seeds a new game is packed inside `FILEDATA.*` and hasn't been located. The hex
   explorer exists to help find it.
 - **Spell / unite parameter tables** — packed game data, not yet located.
-- **`.psv` write and `.max` support** — the PS3 signature needs Sony's key, and MAX Drive
-  uses lzari compression not implemented yet.
+- **`.psv` / `.max` write** — the PS3 signature needs Sony's key, and MAX Drive's LZARI
+  re-encoder isn't ported (reading works).
 
 ---
 
