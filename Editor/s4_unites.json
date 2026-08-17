@@ -1,0 +1,164 @@
+{
+ "0": {
+  "0": {
+   "name": "Friendship Attack",
+   "with": "with Snowe"
+  },
+  "1": {
+   "name": "True Friends Attack",
+   "with": "with Snowe"
+  },
+  "2": {
+   "name": "Double Sword Attack",
+   "with": "with Kika"
+  }
+ },
+ "1": {
+  "0": {
+   "name": "Family Attack",
+   "with": "with Flare"
+  }
+ },
+ "3": {
+  "0": {
+   "name": "Bow & Arrow Attack",
+   "with": "with Aldo"
+  },
+  "1": {
+   "name": "Barrage Attack",
+   "with": "with Aldo & Flare"
+  },
+  "2": {
+   "name": "Barrage Attack (2)",
+   "with": "with Lo Hak & Flare"
+  },
+  "3": {
+   "name": "Barrage Attack (3)",
+   "with": "with Aldo & Frederica"
+  },
+  "4": {
+   "name": "Barrage Attack (4)",
+   "with": "with Lo Hak & Frederica"
+  }
+ },
+ "4": {
+  "0": {
+   "name": "Knight Attack",
+   "with": "with Keneth, Paula & Jewel"
+  }
+ },
+ "5": {
+  "0": {
+   "name": "Giant Sword Attack B",
+   "with": "with Axel & Selma"
+  }
+ },
+ "7": {
+  "0": {
+   "name": "Giant Sword Attack A",
+   "with": "with Mitsuba"
+  }
+ },
+ "9": {
+  "0": {
+   "name": "Love Love Attack",
+   "with": "with Charlemagne"
+  }
+ },
+ "10": {
+  "0": {
+   "name": "Meow Attack",
+   "with": "with Nalkul & Champo \u2014 slot inferred"
+  }
+ },
+ "12": {
+  "0": {
+   "name": "Beauty Attack",
+   "with": "with Ameria & Jeane"
+  },
+  "2": {
+   "name": "Allure Attack",
+   "with": "with Gretchen & Jeane"
+  }
+ },
+ "15": {
+  "0": {
+   "name": "Reverse Adonis Attack",
+   "with": "with Jeremy & Trishtan"
+  }
+ },
+ "23": {
+  "0": {
+   "name": "Sorcerer Attack",
+   "with": "with Katarina"
+  }
+ },
+ "26": {
+  "0": {
+   "name": "Sibling Attack",
+   "with": "with Lo Fong & Lo Hak"
+  }
+ },
+ "27": {
+  "0": {
+   "name": "Fisherman Attack",
+   "with": "with Ugetsu"
+  }
+ },
+ "43": {
+  "0": {
+   "name": "Adonis Attack",
+   "with": "with Hervey & Helmut"
+  },
+  "1": {
+   "name": "Pirate Attack",
+   "with": "with Hervey"
+  }
+ },
+ "57": {
+  "0": {
+   "name": "Berserker Attack",
+   "with": "with Gau"
+  }
+ },
+ "59": {
+  "0": {
+   "name": "Silver Attack",
+   "with": "with Ornan & Bartholomew"
+  }
+ },
+ "60": {
+  "0": {
+   "name": "Master/Pupil Attack",
+   "with": "with Pablo"
+  }
+ },
+ "61": {
+  "0": {
+   "name": "Ninja Attack",
+   "with": "with Mizuki"
+  },
+  "1": {
+   "name": "True Ninja Attack",
+   "with": "with Kate & Mizuki"
+  }
+ },
+ "71": {
+  "0": {
+   "name": "Spear Attack",
+   "with": "with Rachel & Lino En Kuldes"
+  }
+ },
+ "77": {
+  "0": {
+   "name": "Nymph Attack",
+   "with": "with Rita & Millay"
+  }
+ },
+ "97": {
+  "0": {
+   "name": "Physical Attack",
+   "with": "with Helga"
+  }
+ }
+}

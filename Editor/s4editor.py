@@ -331,7 +331,9 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .rgn{font-size:11px;font-weight:700;letter-spacing:.5px;padding:2px 7px;border-radius:999px;
  background:var(--acc2);color:#1a2a33;vertical-align:middle}
 .recsel{margin-left:auto;font-size:11px;padding:2px 6px;max-width:170px}
-input.unite{width:42px;padding:2px 4px;font-size:12px;margin-left:4px;vertical-align:middle}
+input.unite{width:42px;padding:2px 4px;font-size:12px;vertical-align:middle}
+.unites{display:flex;flex-wrap:wrap;gap:6px 16px}
+.ufld{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--fg)}
 .charcard.unrec .recsel{background:#3a2b2b;color:#e79a9a;border-color:#6b4a4a}
 .charcard.unrec{opacity:.72}
 .charcard.unrec .charhead>span:first-child{color:var(--mut)}
@@ -529,10 +531,12 @@ function renderSaves(saves){
     return `<div class="charcard${unrec?' unrec':''}" data-name="${esc(c.name.toLowerCase())}" data-ri="${c.rosterIndex}" data-data="${c.hasData?1:0}">
       <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span>${recSel}</div>
       ${statTable}
-      <div class="seclabel">Runes <span class="mut" style="font-weight:400;text-transform:none;letter-spacing:0">&nbsp;·&nbsp; Unites (0–3):</span>
-        ${[0,1,2].map(s=>`<input type="number" class="unite" min="0" max="3" value="${(c.unites||[0,0,0])[s]||0}" data-ch="${cid}|unite:${s}" title="Unite attack slot ${s+1} level (0 = locked)">`).join('')}
-      </div>
+      <div class="seclabel">Runes</div>
       <div class="grid g3">${rune(0,'Rune 1')}${rune(1,'Rune 2')}${rune(2,'Rune 3')}</div>
+      ${Object.keys(c.uniteNames||{}).length?`<div class="seclabel">Unite Attacks <span class="mut" style="font-weight:400;text-transform:none;letter-spacing:0">(level 0–3)</span></div>
+      <div class="unites">${Object.entries(c.uniteNames).map(([s,u])=>
+        `<label class="ufld" title="${esc(u.with||'')}"><input type="number" class="unite" min="0" max="3" value="${(c.unites||[])[+s]||0}" data-ch="${cid}|unite:${s}"> ${esc(u.name)}</label>`).join('')}
+      </div>`:''}
       <div class="seclabel">Equipment</div>
       <div class="grid g4">${EQUIP_SLOTS.map(([k])=>gear(k,GEAR_LABELS[k]||k)).join('')}</div>
     </div>`;};

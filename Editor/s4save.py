@@ -133,10 +133,19 @@ RECRUIT_STATES = {0: "Not Recruited", 1: "In Your Company", 10: "Recruited",
 PROG_BASE, PROG_STRIDE = 0x108, 0x78
 OFF_PROG_EXP, OFF_PROG_WLVL = 0x00, 0x04
 EXP_MAX, WLVL_MAX = 98999, 15
-# Unite-attack levels: up to three u8 slots per character at P+0x65/+0x67/+0x69 (0=locked,
-# 1..3 = unite level; the CT names them per character, e.g. Lino's "Family Attack" at
-# P[1]+0x65). Verified: never exceeds 3 in any record across 8 saves.
-OFF_PROG_UNITES, UNITE_MAX = (0x65, 0x67, 0x69), 3
+# Unite-attack levels: up to five u8 slots per character at P+0x65/67/69/6B/6D (0=locked,
+# 1..3 = unite level). Each combo's level is stored on ONE member's slot; the slot->combo
+# mapping was extracted from the CT's per-character unite addresses (e.g. Ted carries all
+# five of his combos: Bow & Arrow + Barrage 1-4) and named from ninjaskipper's GameFAQs
+# Combo Attacks guide. See s4_unites.json. Verified: never exceeds 3 in any record.
+OFF_PROG_UNITES, UNITE_MAX = (0x65, 0x67, 0x69, 0x6B, 0x6D), 3
+try:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "s4_unites.json")) as _f:
+        import json as _json
+        UNITE_NAMES = {int(k): {int(s): v for s, v in d.items()}
+                       for k, d in _json.load(_f).items()}
+except Exception:
+    UNITE_NAMES = {}
 
 # World-map exploration flags — 0x175 (373) u32s at gamedata 0xA950 (RAM 0x53D1B0).
 # Confirmed: saves where the CT's "World Map Fully Explored" cheat was used hold exactly
@@ -408,6 +417,7 @@ def decode_character(gamedata, roster_index):
         "exp": struct.unpack_from("<I", gamedata, prog + OFF_PROG_EXP)[0],
         "weaponLvl": gamedata[prog + OFF_PROG_WLVL],
         "unites": [gamedata[prog + o] for o in OFF_PROG_UNITES],
+        "uniteNames": {s: v for s, v in UNITE_NAMES.get(roster_index, {}).items()},
         "rosterIndex": roster_index,
         "name": CHAR_NAMES.get(roster_index, f"#{roster_index}"),
         "addr": off,
