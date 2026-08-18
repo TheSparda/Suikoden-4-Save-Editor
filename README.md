@@ -159,6 +159,9 @@ Editor/
 Base ISO/                your Suikoden IV disc image (USA or PAL) — not included
 ```
 
+## Support & feature requests
+Feature requests/Support avail on the **Toran Castle Discord**: https://discord.gg/KesHMX5P2Z
+
 ## Credits
 Data model derived from the community PCSX2 Cheat Engine tables for Suikoden IV.
 PS2 memory-card ECC, the CodeBreaker RC4 constant, and the LZARI algorithm from `mymc`
