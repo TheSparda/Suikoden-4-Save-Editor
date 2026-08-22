@@ -1,5 +1,9 @@
 # Suikoden IV Save Editor
 
+> **▶ [Open the web editor](https://thesparda.github.io/Suikoden-4-Save-Editor/web/)** —
+> edit your saves right in the browser (or install it on Android). Nothing to download,
+> nothing uploaded. See [`web/`](web/) for details.
+
 A cross-platform **save editor** for **Suikoden IV** (PlayStation 2). Edit recruitment,
 levels, stats, runes, equipment, unite attacks, money, and more — directly in your PS2
 saves — and the file is re-checksummed and re-ECC'd so the game loads it normally.
