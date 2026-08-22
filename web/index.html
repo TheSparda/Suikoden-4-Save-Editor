@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a141e">
+  <meta name="description" content="Edit Suikoden IV PS2 saves entirely on your device — nothing is uploaded.">
+  <title>Suikoden IV Save Editor (Web)</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Suikoden IV <span>Save Editor</span></h1>
+      <span class="sp"></span>
+      <button id="installBtn" class="chip hidden">⬇ Install app</button>
+      <button class="chip" onclick="toggleTheme()">◐ Theme</button>
+    </header>
+
+    <div class="tabs">
+      <div class="tab on" data-t="save" onclick="tab('save')">Save Editor</div>
+      <div class="tab" data-t="ref" onclick="tab('ref')">Reference</div>
+    </div>
+
+    <main>
+      <section id="t-save">
+        <div class="card" id="loaderCard">
+          <div class="drop" id="drop">
+            <div><b>Drop a PS2 save file here</b> — or</div>
+            <label class="file">
+              <button type="button" id="pickBtn" disabled>Choose file…</button>
+              <input type="file" id="file">
+            </label>
+            <div class="mut" id="engineStatus"><span class="spinner"></span>Starting Python engine…</div>
+            <div class="mut">Supports memory cards (.ps2 .mcd .mc2 .bin) and exported saves (.cbs .psu .sps read/write · .max .psv read-only).</div>
+          </div>
+          <div class="note" style="margin-top:12px">
+            Everything runs on your device — the save file is never uploaded. Edits recompute the
+            gamedata checksum (and memory-card ECC) so the game loads the save normally. You download
+            an edited <em>copy</em>; your original file is untouched.
+          </div>
+        </div>
+        <div id="saveout"></div>
+      </section>
+
+      <section id="t-ref" hidden></section>
+    </main>
+
+    <footer class="appfoot">
+      Made by <b>Sparda</b> ·
+      <a href="https://github.com/TheSparda/Suikoden-4-Save-Editor" target="_blank" rel="noopener noreferrer">GitHub</a>
+      · v1.2.0
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
