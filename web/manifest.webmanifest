@@ -1,7 +1,7 @@
 {
   "name": "Suikoden IV Save Editor",
-  "short_name": "S4 Editor",
-  "description": "Edit Suikoden IV PS2 saves entirely on your device — nothing is uploaded.",
+  "short_name": "S4 Save Editor",
+  "description": "Edit Suikoden IV (PS2) saves entirely on your device — recruitment, stats, runes, unites, equipment, names, Potch and more.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
@@ -12,5 +12,16 @@
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
-  ]
+  ],
+  "share_target": {
+    "action": "share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [{
+        "name": "save",
+        "accept": ["application/octet-stream", ".ps2", ".mcd", ".mc2", ".bin", ".psu", ".psv", ".cbs", ".sps", ".max"]
+      }]
+    }
+  }
 }

@@ -1,8 +1,13 @@
-/* Service worker — installable + offline.
- * App shell + the ../Editor Python/reference files are network-first (fresh when online,
- * cached fallback offline). The large, version-pinned Pyodide CDN assets are cache-first
- * (downloaded once, instant thereafter). Bump CACHE to force a refresh after a deploy. */
-const CACHE = "s4editor-v1";
+// Service worker for the Suikoden IV Save Editor PWA.
+//
+// Goal: installable on Android + usable offline after the first successful load.
+// Strategy:
+//   - same-origin (app shell + ../Editor/ python & reference files): network-first, falling
+//     back to cache when offline. Keeps a new deploy fresh yet still works with no signal.
+//   - cross-origin (the Pyodide CDN — large, immutable, version-pinned URLs): cache-first,
+//     so the ~10 MB runtime downloads once and is instant thereafter.
+const CACHE = "s4editor-v2";
+const SHARE_CACHE = "s4editor-share";   // must match app.js (share-target hand-off)
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png",
@@ -11,18 +16,38 @@ const SHELL = [
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
+
 self.addEventListener("activate", (e) => {
+  const keep = [CACHE, SHARE_CACHE];      // never purge a pending shared-in file
   e.waitUntil(caches.keys()
-    .then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+    .then((ks) => Promise.all(ks.filter((k) => !keep.includes(k)).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
+
 self.addEventListener("fetch", (e) => {
   const req = e.request;
+  // Web Share Target: a save shared into the installed PWA arrives as a POST. Stash the file,
+  // then redirect to the app which picks it up (?shared=1). See app.js pickupSharedFile.
+  if (req.method === "POST" && new URL(req.url).pathname.endsWith("/share-target")) {
+    e.respondWith((async () => {
+      try {
+        const form = await req.formData();
+        const file = form.get("save");
+        if (file) {
+          const c = await caches.open(SHARE_CACHE);
+          await c.put("shared-save", new Response(file,
+            { headers: { "X-Filename": encodeURIComponent(file.name || "shared.bin") } }));
+        }
+      } catch (err) { /* ignore — app just shows the loader */ }
+      return Response.redirect("./?shared=1", 303);
+    })());
+    return;
+  }
   if (req.method !== "GET") return;
   const sameOrigin = new URL(req.url).origin === self.location.origin;
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    if (sameOrigin) {                              // network-first (app shell + ../Editor files)
+    if (sameOrigin) {
       try {
         const res = await fetch(req);
         if (res && res.status === 200) cache.put(req, res.clone());
@@ -34,7 +59,7 @@ self.addEventListener("fetch", (e) => {
         throw err;
       }
     }
-    const hit = await cache.match(req);            // cross-origin (Pyodide CDN): cache-first
+    const hit = await cache.match(req);
     if (hit) return hit;
     const res = await fetch(req);
     if (res && res.status === 200 && (res.type === "basic" || res.type === "cors")) {

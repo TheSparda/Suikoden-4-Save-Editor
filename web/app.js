@@ -1,63 +1,79 @@
-/* Suikoden IV Save Editor (Web)
- * Runs the repo's real stdlib-only Python save module (Editor/s4save.py) unchanged inside
- * Pyodide. The picked save is written into Pyodide's in-memory FS, decoded/edited by the
- * Python module, and the edited bytes are read straight back out for download.
- * The save file never leaves the device. See web/README.md and the porting guide.
- */
+// Suikoden IV Save Editor — web front-end (full parity with the desktop save editor).
+//
+// We do NOT reimplement save logic in JS. The real Editor/s4save.py (+ s4files.py, s4lzari.py)
+// runs in Pyodide (CPython/WASM). The uploaded save is written to Pyodide's in-memory FS and
+// the existing path-based read_all_s4_saves()/write_save_edits() are called unchanged, so the
+// gamedata checksum (CRC32 + reversed MD5) and memory-card ECC come from the tried module.
+// Nothing is uploaded — everything happens on-device.
+
 "use strict";
 
 const SAVE_PATH = "/save.bin";
-const EDITOR_DIR = "../Editor";          // served from the repo root (see .nojekyll / Pages)
+const EDITOR_DIR = "../Editor";
+// recruitment status enum — the exact byte the game checks (s4save.RECRUIT_STATES)
+const REC_STATES = [[0, "Not Recruited"], [1, "In Your Company"], [10, "Recruited"],
+                    [11, "In Party"], [15, "Permanently In Party"]];
+const STAT_NAMES = ["STR", "SKL", "MAG", "EVA", "PDF", "MDF", "SPD", "LUK"];
+const GEAR_LABELS = { head: "Head", body: "Body", hands: "Hands", feet: "Feet",
+                      acc1: "Accessory 1", acc2: "Accessory 2", acc3: "Accessory 3" };
+const CHAR_CAP = { maxHP: 9999, exp: 98999, weaponLvl: 15 };
 
-let pyReady = null;                       // resolves to the pyodide instance
-let REF = {};                             // {runes, items, equipSlots, chars}
-let saves = [];                           // decoded saves currently loaded
-let origName = "save.bin";                // name of the picked file (for the download name)
+let pyReady = null, PY = null;      // PY = resolved pyodide (sync access keeps share() in-gesture)
+let REF = { runes: [], items: [], equipSlots: [], chars: [] };
+let ITEM_BY_ID = {}, RUNE_BY_ID = {}, EQUIP_SLOTS = [];
+let saves = [], curSlot = 0, origName = "save.bin";
 
-// prebuilt option strings, made once from the reference tables
-let RUNE_LIST = [], ITEM_LIST = [], EQUIP_SLOTS = [], ITEM_OPTS = "";
+// File System Access API (desktop Chromium): overwrite the original file in place instead of
+// downloading a copy. Absent on Android/Firefox/Safari → fall back to download.
+let fileHandle = null;
+const SUPPORTS_FS = typeof window !== "undefined" && "showOpenFilePicker" in window;
+// Web Share with files (Android Chrome): send the edited save straight to another app.
+const CAN_SHARE_FILES = (() => {
+  try { return !!(navigator.canShare && navigator.canShare({ files: [new File([new Blob([1])], "t.bin")] })); }
+  catch (e) { return false; }
+})();
+const SHARE_CACHE = "s4editor-share";   // must match sw.js (share-target hand-off)
 
-// ---------- tiny helpers ----------
-const $ = (s, e = document) => e.querySelector(s);
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const spinner = msg => `<div class="loading"><span class="helm"></span><span>${esc(msg || "loading…")}</span></div>`;
-const skelCards = (n = 3) => `<div class="skelgrid">${'<div class="skel"></div>'.repeat(n)}</div>`;
-async function withBusy(btn, fn) { if (btn) btn.classList.add("busy"); try { return await fn(); } finally { if (btn) btn.classList.remove("busy"); } }
-
-// ---------- theme + tabs ----------
-function toggleTheme() {
-  const d = document.documentElement;
-  const n = d.getAttribute("data-theme") === "light" ? "" : "light";
-  n ? d.setAttribute("data-theme", n) : d.removeAttribute("data-theme");
-  try { localStorage.setItem("s4editor-theme", n); } catch (e) {}
+// ---- tiny IndexedDB kv (remembers the last opened save across sessions) ----
+const IDB_DB = "s4editor", IDB_STORE = "kv";
+function _idb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(IDB_DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(IDB_STORE);
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
 }
-try { const t = localStorage.getItem("s4editor-theme"); if (t) document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+async function idbSet(k, v) { const db = await _idb(); return new Promise((res, rej) => { const t = db.transaction(IDB_STORE, "readwrite"); t.objectStore(IDB_STORE).put(v, k); t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); }
+async function idbGet(k) { const db = await _idb(); return new Promise((res, rej) => { const t = db.transaction(IDB_STORE, "readonly"); const q = t.objectStore(IDB_STORE).get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+async function idbDel(k) { const db = await _idb(); return new Promise((res, rej) => { const t = db.transaction(IDB_STORE, "readwrite"); t.objectStore(IDB_STORE).delete(k); t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); }
 
-let refRendered = false;
-function tab(t) {
-  for (const el of document.querySelectorAll(".tab")) el.classList.toggle("on", el.dataset.t === t);
-  $("#t-save").hidden = t !== "save";
-  $("#t-ref").hidden = t !== "ref";
-  if (t === "ref" && !refRendered) renderReference();
-}
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const hx = (n, w) => (n >>> 0).toString(16).toUpperCase().padStart(w, "0");
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const lvFromExp = (exp) => Math.min(99, Math.floor((exp || 0) / 1000) + 1);
+const expFromLv = (lv) => (Math.min(99, Math.max(1, lv)) - 1) * 1000;
+const gtLabel = (sec) => `${Math.floor((sec || 0) / 3600)}h${String(Math.floor(((sec || 0) % 3600) / 60)).padStart(2, "0")}m`;
 
-// ---------- engine boot ----------
+// ---- Pyodide bootstrap -----------------------------------------------------
 async function bootPyodide() {
+  bootProgress(10, "Downloading Python runtime…");
   const py = await loadPyodide();
+  bootProgress(55, "Loading save module…");
   const grab = async (url) => {
     const r = await fetch(url);
     if (!r.ok) throw new Error(`fetch ${url} (${r.status})`);
     return r;
   };
-  // 1) the real save modules — unchanged — into Pyodide's FS
   for (const mod of ["s4lzari.py", "s4files.py", "s4save.py"]) {
     py.FS.writeFile(mod, await (await grab(`${EDITOR_DIR}/${mod}`)).text());
   }
-  // 2) reference/name tables the module loads at import time (same dir as the module)
   for (const j of ["s4_item_names.json", "s4_rune_names.json", "s4_char_offsets.json", "s4_unites.json"]) {
     py.FS.writeFile(j, await (await grab(`${EDITOR_DIR}/${j}`)).text());
   }
-  // 3) thin JSON-in / JSON-out glue — all byte work stays inside the trusted module
+  bootProgress(80, "Parsing reference tables…");
+
   py.runPython(`
 import json, os, sys
 sys.path.insert(0, os.getcwd())
@@ -71,7 +87,6 @@ def load_saves(path):
 
 def apply_edits(path, folder, payload_json):
     p = json.loads(payload_json)
-    # JSON object keys are strings; the writer keys characters by integer roster index.
     char_edits = {int(k): v for k, v in (p.get("charEdits") or {}).items()}
     res = SV.write_save_edits(
         path, folder,
@@ -93,32 +108,509 @@ def load_reference():
     return json.dumps({"runes": runes, "items": items,
                        "equipSlots": SV.EQUIP_SLOTS, "chars": chars})
 `);
+  REF = JSON.parse(py.runPython("load_reference()"));
+  REF.items.forEach((i) => (ITEM_BY_ID[i.id] = i));
+  REF.runes.forEach((r) => (RUNE_BY_ID[r.id] = r));
+  EQUIP_SLOTS = REF.equipSlots || [];
+  PY = py;
+  bootProgress(100, "Ready");
   return py;
 }
 
-function setEngineStatus(msg, isErr) {
-  const el = $("#engineStatus");
-  if (el) el.innerHTML = isErr ? `<span class="err">${esc(msg)}</span>` : esc(msg);
+// ---- label helpers ---------------------------------------------------------
+function itemLabel(id) { return id ? (ITEM_BY_ID[id]?.name || "#" + id) : "— empty —"; }
+function runeLabel(id) { return id ? (RUNE_BY_ID[id]?.name || "#" + id) : "— none —"; }
+function charRefLabel(idx) { const c = REF.chars.find((x) => x.index === idx); return c ? c.name : "#" + idx; }
+
+// ---- shared modal a11y (focus trap + Esc + focus restore) ------------------
+function modalA11y(ov, closeFn, initial) {
+  const prev = document.activeElement;
+  const SEL = 'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])';
+  const focusables = () => $$(SEL, ov).filter((el) => !el.disabled && el.offsetParent !== null);
+  const close = () => { document.removeEventListener("keydown", onKey, true); closeFn(); if (prev && prev.focus) try { prev.focus(); } catch (e) {} };
+  function onKey(e) {
+    if (e.key === "Escape") { e.preventDefault(); close(); return; }
+    if (e.key === "Tab") {
+      const f = focusables(); if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+  document.addEventListener("keydown", onKey, true);
+  setTimeout(() => { const t = initial || focusables()[0]; if (t && t.focus) t.focus(); }, 30);
+  return close;
 }
 
-// ---------- load a picked/dropped file ----------
-async function handleFile(file) {
-  const py = await pyReady;
-  origName = file.name || "save.bin";
-  $("#saveout").innerHTML = spinner("reading save…") + skelCards(3);
+// ---- searchable picker (replaces long native <select>s — the big mobile win) ----
+// list = [{id,name}]; onPick(id) fires on choose; idFmt formats the id prefix per domain.
+function openPicker(title, list, current, onPick, idFmt) {
+  idFmt = idFmt || ((id) => hx(id, 4));
+  const ov = document.createElement("div");
+  ov.className = "modal-ov";
+  ov.innerHTML = `<div class="modal picker-modal" role="dialog" aria-label="${esc(title)}">
+      <div class="modal-h"><b>${esc(title)}</b><button class="modal-x" aria-label="close">✕</button></div>
+      <input class="picker-search" placeholder="type to filter by name or id…" autocomplete="off">
+      <div class="picker-list"></div></div>`;
+  document.body.appendChild(ov);
+  const listEl = $(".picker-list", ov), search = $(".picker-search", ov);
+  let close = () => ov.remove();
+
+  function render(f) {
+    const q = (f || "").toLowerCase();
+    const rows = list.filter((o) => !q || o.name.toLowerCase().includes(q) ||
+      (o.id && (hx(o.id, 2).toLowerCase().includes(q) || hx(o.id, 4).toLowerCase().includes(q) || String(o.id) === q)));
+    listEl.innerHTML = rows.slice(0, 300).map((o) =>
+      `<button class="picker-row${o.id === current ? " cur" : ""}" data-id="${o.id}">
+         <span class="pr-name">${o.id ? idFmt(o.id) + " · " : ""}${esc(o.name)}</span></button>`).join("") ||
+      `<div class="muted" style="padding:12px">no matches</div>`;
+    if (rows.length > 300) listEl.insertAdjacentHTML("beforeend",
+      `<div class="muted" style="padding:8px 12px">…${rows.length - 300} more — keep typing</div>`);
+    $$(".picker-row", listEl).forEach((b) => (b.onclick = () => { onPick(+b.dataset.id); close(); }));
+  }
+  render("");
+  search.oninput = () => render(search.value);
+  close = modalA11y(ov, () => ov.remove(), search);
+  $(".modal-x", ov).onclick = () => close();
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+}
+
+// ---- File loading ----------------------------------------------------------
+async function openViaPicker() {
   try {
-    py.FS.writeFile(SAVE_PATH, new Uint8Array(await file.arrayBuffer()));
-    const out = JSON.parse(py.runPython(`load_saves(${JSON.stringify(SAVE_PATH)})`));
-    if (out.error) { $("#saveout").innerHTML = `<p class="err">${esc(out.error)}</p>`; return; }
-    saves = out.saves || [];
-    if (!saves.length) { $("#saveout").innerHTML = '<p class="mut">No Suikoden IV save found in that file.</p>'; return; }
-    renderSaves();
+    const [h] = await window.showOpenFilePicker({ multiple: false });
+    fileHandle = h;
+    await handleFile(await h.getFile(), h);
   } catch (e) {
-    $("#saveout").innerHTML = `<p class="err">Failed to read save: ${esc(e.message)}</p>`;
+    if (e && e.name !== "AbortError") setDropMsg("Could not open file: " + e.message, true);
   }
 }
+async function ensureWritable(h) {
+  const opts = { mode: "readwrite" };
+  if ((await h.queryPermission(opts)) === "granted") return true;
+  return (await h.requestPermission(opts)) === "granted";
+}
 
-// ---------- download helpers ----------
+async function handleFile(file, handle) {
+  const py = await pyReady;
+  fileHandle = handle || null;              // plain <input>/drag-drop have no handle
+  origName = file.name || "save.bin";
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  py.FS.writeFile(SAVE_PATH, bytes);
+  let out;
+  try {
+    out = JSON.parse(py.runPython(`load_saves(${JSON.stringify(SAVE_PATH)})`));
+  } catch (e) { return setDropMsg("Failed to read save: " + e.message, true); }
+  if (out.error) { $("#editor").innerHTML = ""; return setDropMsg(out.error, true); }
+  saves = out.saves || [];
+  if (!saves.length) { $("#editor").innerHTML = ""; return setDropMsg("No Suikoden IV save found in that file.", true); }
+  curSlot = 0;
+  setDropMsg("Python engine ready — load a save file.", false);   // clear any prior error
+  rememberSave(origName, bytes, fileHandle);
+  renderEditor();
+  $("#editor").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ---- remember last opened save --------------------------------------------
+function rememberSave(name, bytes, handle) {
+  idbSet("lastSave", { name, bytes, handle: handle || null, at: Date.now() }).catch(() => {});
+}
+async function showRecent() {
+  const el = $("#recent"); if (!el) return;
+  let rec; try { rec = await idbGet("lastSave"); } catch (e) { return; }
+  if (!rec) { el.innerHTML = ""; return; }
+  const kb = Math.round((rec.bytes?.length || 0) / 1024);
+  el.innerHTML = `<div class="recent">Last opened:
+      <button class="chip" id="reopenBtn">↻ ${esc(rec.name)} <span class="muted">(${kb} KB)</span></button>
+      <button class="chip mini" id="forgetBtn" title="forget">✕</button></div>`;
+  $("#reopenBtn").onclick = () => reopenLast(rec);
+  $("#forgetBtn").onclick = async () => { await idbDel("lastSave").catch(() => {}); el.innerHTML = ""; };
+}
+async function reopenLast(rec) {
+  if (SUPPORTS_FS && rec.handle) {
+    try {
+      if (await ensureWritable(rec.handle)) return handleFile(await rec.handle.getFile(), rec.handle);
+    } catch (e) { /* handle stale/denied → fall back to stored bytes */ }
+  }
+  handleFile(new File([rec.bytes], rec.name));
+}
+
+// ---- Web Share Target: a save shared INTO the installed PWA ----------------
+async function pickupSharedFile() {
+  if (!new URLSearchParams(location.search).has("shared")) return false;
+  history.replaceState({}, "", location.pathname);
+  try {
+    const c = await caches.open(SHARE_CACHE);
+    const res = await c.match("shared-save");
+    if (res) {
+      const blob = await res.blob();
+      const name = decodeURIComponent(res.headers.get("X-Filename") || "shared.bin");
+      await c.delete("shared-save");
+      await handleFile(new File([blob], name));
+      return true;
+    }
+  } catch (e) { /* ignore */ }
+  return false;
+}
+
+// ---- top-level editor render ----------------------------------------------
+// Per-slot staged edits (reset when switching slots). Only *touched* fields are staged,
+// so the review list and the write are minimal.
+let CE, NAMES, SAVEDITS, SEARCH, RECRUITED_ONLY;
+
+function renderEditor() {
+  const ed = $("#editor");
+  const slotBar = saves.length > 1
+    ? `<div class="card"><div class="slotbar"><b>Save slot:</b>${saves.map((s, i) =>
+        `<button class="chip${i === curSlot ? " on" : ""}" data-slot="${i}">${esc(s.label)}${s.region ? " · " + esc(s.region) : ""}</button>`).join("")}
+        <span class="muted" id="slotmeta" style="margin-left:auto"></span></div></div>`
+    : "";
+  ed.innerHTML = slotBar + `<div id="slotbody"></div>`;
+  $$("[data-slot]", ed).forEach((b) => (b.onclick = () => { curSlot = +b.dataset.slot; drawSlot(); }));
+  drawSlot();
+}
+
+function drawSlot() {
+  const s = saves[curSlot];
+  CE = {}; NAMES = {}; SAVEDITS = {}; SEARCH = ""; RECRUITED_ONLY = false;
+
+  const cksum = s.checksumValid ? `<span class="pill on">checksum ok</span>` : `<span class="pill">checksum off</span>`;
+  const metaBits = [
+    s.region ? `Region ${esc(s.region)}` : null,
+    (s.meta && s.meta.title) ? esc(s.meta.title) : null,
+    `${(s.characters || []).filter((c) => (c.recruited || 0) >= 10).length} recruited`,
+    s.container && s.container !== "memcard" ? `${esc(s.container.toUpperCase())} container` : null,
+  ].filter(Boolean).join(" · ");
+
+  const names = (s.names || []).map((n) =>
+    `<label class="field"><span>${esc(n.label)}</span>
+       <input type="text" maxlength="${n.max}" value="${esc(n.value || "")}"
+              data-name="${esc(n.key)}" data-def="${esc(n.value || "")}"></label>`).join("");
+
+  if (saves.length > 1) {
+    const sm = $("#slotmeta");
+    if (sm) sm.textContent = `${s.folder}${s.checksumValid ? "" : " · checksum off"}`;
+  }
+
+  const ro = s.writable === false;
+  const roNote = ro ? `<div class="warnbox">${esc(s.note || "This container is read-only")} — convert it to a .ps2/.cbs/.psu to edit and save.</div>` : "";
+
+  $("#slotbody").innerHTML = `
+    <div class="card">
+      <div class="muted" style="margin:-2px 0 8px">${metaBits}${s.checksumValid ? "" : " · "}</div>
+      <div class="row" style="margin-bottom:6px">${cksum}</div>
+      ${roNote}
+      <h3 class="sec">Names</h3>
+      <div class="grid">${names}</div>
+      <h3 class="sec">Money &amp; time</h3>
+      <div class="grid">
+        <label class="field"><span>Potch</span>
+          <input type="number" min="0" max="99999999" id="potchfld"
+                 value="${s.potch || 0}" data-def="${s.potch || 0}"></label>
+        <label class="field"><span>Game time (seconds) — <span id="gtlabel">${gtLabel(s.gameTimeSec)}</span></span>
+          <input type="number" min="0" max="3596400" id="gtfld"
+                 value="${s.gameTimeSec || 0}" data-def="${s.gameTimeSec || 0}"></label>
+        <div class="field"><span>World map (${s.worldMapPct != null ? s.worldMapPct + "% explored" : "—"})</span>
+          <label class="row" style="gap:6px;cursor:pointer;min-height:38px">
+            <input type="checkbox" id="wmfull"> mark fully explored on write</label></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <h3 class="sec" style="margin:0">Characters</h3>
+        <label class="row" style="gap:6px;cursor:pointer"><input type="checkbox" id="reconly"> recruited only</label>
+      </div>
+      <input class="search" id="sq" placeholder="filter by name or #…">
+      <div id="charbox"></div>
+      <div class="toolbar">
+        ${ro
+          ? `<span class="status warn">Read-only container — editing disabled. Convert to .ps2/.cbs/.psu first.</span>`
+          : (SUPPORTS_FS && fileHandle
+              ? `<button class="primary" id="saveFileBtn">Apply &amp; save to file</button>
+                 <button id="saveBtn">Download copy</button>`
+              : `<button class="primary" id="saveBtn">Apply &amp; download</button>`) +
+            (CAN_SHARE_FILES ? `<button id="shareBtn">Apply &amp; share…</button>` : "") +
+            `<button id="resetBtn">Reset</button>
+             <span class="badge hidden" id="dirtyBadge">0 unsaved</span>
+             <span class="status" id="status"></span>`}
+      </div>
+    </div>`;
+
+  // wire names + money/time
+  $$("input[data-name]").forEach((inp) => (inp.oninput = () => {
+    inp.classList.toggle("dirty", inp.value !== inp.dataset.def);
+    NAMES[inp.dataset.name] = inp.value; refreshDirty();
+  }));
+  const potch = $("#potchfld"); if (potch) potch.oninput = () => {
+    potch.classList.toggle("dirty", potch.value !== potch.dataset.def);
+    SAVEDITS.potch = +potch.value; refreshDirty();
+  };
+  const gt = $("#gtfld"); if (gt) gt.oninput = () => {
+    gt.classList.toggle("dirty", gt.value !== gt.dataset.def);
+    SAVEDITS.gameTime = +gt.value; $("#gtlabel").textContent = gtLabel(+gt.value); refreshDirty();
+  };
+  const wm = $("#wmfull"); if (wm) wm.onchange = () => {
+    if (wm.checked) SAVEDITS.worldMapFull = 1; else delete SAVEDITS.worldMapFull;
+    wm.closest(".field")?.classList.toggle("dirty-soft", wm.checked); refreshDirty();
+  };
+
+  const rc = $("#reconly"); if (rc) rc.onchange = () => { RECRUITED_ONLY = rc.checked; drawChars(); };
+  const sq = $("#sq"); if (sq) sq.oninput = () => { SEARCH = sq.value.toLowerCase(); drawChars(); };
+  const sb = $("#saveBtn"); if (sb) sb.onclick = () => applyEdits("download");
+  const sfb = $("#saveFileBtn"); if (sfb) sfb.onclick = () => applyEdits("file");
+  const shb = $("#shareBtn"); if (shb) shb.onclick = () => applyEdits("share");
+  const rb = $("#resetBtn"); if (rb) rb.onclick = drawSlot;
+  drawChars();
+}
+
+// ---- Characters ------------------------------------------------------------
+function charByRoster(ri) { return saves[curSlot].characters.find((c) => c.rosterIndex === ri); }
+
+function drawChars() {
+  const s = saves[curSlot];
+  let pool = s.characters || [];
+  if (RECRUITED_ONLY) pool = pool.filter((c) => (c.recruited || 0) >= 10);
+  const shown = pool.filter((c) => !SEARCH || c.name.toLowerCase().includes(SEARCH) || String(c.rosterIndex) === SEARCH);
+  const box = $("#charbox");
+  box.innerHTML = shown.map(charCard).join("") || `<div class="muted" style="padding:6px 2px">no matching characters</div>`;
+  shown.forEach(wireChar);
+}
+
+function charCard(c) {
+  const ri = c.rosterIndex;
+  const unrec = (c.recruited || 0) === 0;
+  const num = (k, val, max) =>
+    `<input type="number" min="0" max="${max}" value="${val}" data-ri="${ri}" data-k="${k}" data-def="${val}" title="0–${max}">`;
+  const stat = (n) =>
+    `<label class="field"><span>${n}</span><input type="number" min="0" max="999" value="${c.stats[n]}" data-ri="${ri}" data-stat="${n}" data-def="${c.stats[n]}"></label>`;
+
+  const lv = lvFromExp(c.exp);
+  const core = `
+    <label class="field"><span>Level</span>
+      <input type="number" min="1" max="99" value="${lv}" data-lv="${ri}" data-def="${lv}" title="writes EXP = (Lv−1)×1000"></label>
+    <label class="field"><span>EXP</span>${num("exp", c.exp || 0, CHAR_CAP.exp)}</label>
+    <label class="field"><span>Weapon Lv</span>${num("weaponLvl", c.weaponLvl || 0, CHAR_CAP.weaponLvl)}</label>
+    <label class="field"><span>Max HP</span>${num("maxHP", c.maxHP, CHAR_CAP.maxHP)}</label>`;
+
+  const stats = STAT_NAMES.map(stat).join("");
+
+  const runes = [0, 1, 2].map((slot) => {
+    const cur = c.runes[slot] || 0;
+    return `<label class="field"><span>Rune ${slot + 1}</span>
+      <button type="button" class="picker" data-runeri="${ri}" data-slot="${slot}" data-val="${cur}" data-def="${cur}">${esc(runeLabel(cur))}</button></label>`;
+  }).join("");
+
+  const equip = EQUIP_SLOTS.map(([key]) => {
+    const cur = (c.equip || {})[key] || 0;
+    return `<label class="field"><span>${GEAR_LABELS[key] || key}</span>
+      <button type="button" class="picker" data-eqri="${ri}" data-eq="${key}" data-val="${cur}" data-def="${cur}">${esc(itemLabel(cur))}</button></label>`;
+  }).join("");
+
+  const uNames = c.uniteNames || {};
+  const unites = Object.keys(uNames).length
+    ? `<h4>Unite attacks <span class="muted" style="text-transform:none;letter-spacing:0">(level 0–3)</span></h4>
+       <div class="grid sk">${Object.entries(uNames).map(([slot, u]) =>
+        `<label class="field" title="${esc(u.with || "")}"><span>${esc(u.name)}</span>
+          <input type="number" min="0" max="3" value="${(c.unites || [])[+slot] || 0}" data-uri="${ri}" data-uslot="${slot}" data-def="${(c.unites || [])[+slot] || 0}"></label>`).join("")}</div>`
+    : "";
+
+  const recOpts = REC_STATES.map(([v, l]) => `<option value="${v}"${v === c.recruited ? " selected" : ""}>${l}</option>`).join("") +
+    (REC_STATES.some(([v]) => v === c.recruited) ? "" : `<option value="${c.recruited}" selected>? (${c.recruited})</option>`);
+
+  return `<details class="char${unrec ? " unrec" : ""}"><summary>
+      <span class="chev">▸</span><span class="nm">${esc(c.name)}</span>
+      <span class="muted">#${ri}</span>
+      <span class="pill${(c.recruited || 0) >= 10 ? " on" : ""}">${esc(c.recruitedName || "")}</span>
+      <span class="lv">Lv ${lv} · HP ${c.maxHP}</span></summary>
+    <div class="char-body" data-roster="${ri}">
+      <div class="row" style="gap:8px;margin:6px 0 2px"><span class="muted">Recruitment</span>
+        <select data-recruit="${ri}" style="max-width:220px">${recOpts}</select></div>
+      <h4>Core</h4><div class="grid">${core}</div>
+      <h4>Stats</h4><div class="grid">${stats}</div>
+      <h4>Runes</h4><div class="grid eq">${runes}</div>
+      ${unites}
+      <h4>Equipment</h4><div class="grid eq">${equip}</div>
+    </div></details>`;
+}
+
+function ce(ri) { return (CE[ri] = CE[ri] || {}); }
+
+function wireChar(c) {
+  const ri = c.rosterIndex;
+  const body = $(`.char-body[data-roster="${ri}"]`);
+  if (!body) return;
+  // numeric core + stats
+  $$("input[data-k]", body).forEach((inp) => (inp.onchange = () => {
+    ce(ri)[inp.dataset.k] = +inp.value;
+    inp.classList.toggle("dirty", inp.value !== inp.dataset.def);
+    if (inp.dataset.k === "exp") { const lvIn = $(`input[data-lv="${ri}"]`, body); if (lvIn) lvIn.value = lvFromExp(+inp.value); }
+    refreshDirty();
+  }));
+  $$("input[data-stat]", body).forEach((inp) => (inp.onchange = () => {
+    (ce(ri).stats = ce(ri).stats || {})[inp.dataset.stat] = +inp.value;
+    inp.classList.toggle("dirty", inp.value !== inp.dataset.def); refreshDirty();
+  }));
+  // level → drives EXP
+  const lvIn = $(`input[data-lv="${ri}"]`, body);
+  if (lvIn) lvIn.oninput = () => {
+    const exp = expFromLv(+lvIn.value);
+    const expIn = $(`input[data-k="exp"]`, body);
+    if (expIn) { expIn.value = exp; expIn.classList.toggle("dirty", String(exp) !== expIn.dataset.def); }
+    ce(ri).exp = exp;
+    lvIn.classList.toggle("dirty", lvIn.value !== lvIn.dataset.def); refreshDirty();
+  };
+  // runes
+  $$("button.picker[data-runeri]", body).forEach((btn) => (btn.onclick = () => {
+    const slot = +btn.dataset.slot, cur = +btn.dataset.val;
+    openPicker(`Rune ${slot + 1}`, REF.runes, cur, (id) => {
+      btn.dataset.val = id; btn.textContent = runeLabel(id);
+      btn.classList.toggle("dirty", String(id) !== btn.dataset.def);
+      (ce(ri).runes = ce(ri).runes || {})[slot] = id; refreshDirty();
+    }, (id) => hx(id, 2));
+  }));
+  // equipment
+  $$("button.picker[data-eq]", body).forEach((btn) => (btn.onclick = () => {
+    const key = btn.dataset.eq, cur = +btn.dataset.val;
+    openPicker(`Equip — ${GEAR_LABELS[key] || key}`, REF.items, cur, (id) => {
+      btn.dataset.val = id; btn.textContent = itemLabel(id);
+      btn.classList.toggle("dirty", String(id) !== btn.dataset.def);
+      (ce(ri).equip = ce(ri).equip || {})[key] = id; refreshDirty();
+    });
+  }));
+  // unites
+  $$("input[data-uri]", body).forEach((inp) => (inp.onchange = () => {
+    (ce(ri).unites = ce(ri).unites || {})[inp.dataset.uslot] = +inp.value;
+    inp.classList.toggle("dirty", inp.value !== inp.dataset.def); refreshDirty();
+  }));
+  // recruitment
+  $$("select[data-recruit]", body).forEach((se) => (se.onchange = () => {
+    ce(ri).recruited = +se.value;
+    se.classList.toggle("dirty", +se.value !== c.recruited); refreshDirty();
+  }));
+}
+
+// ---- dirty tracking / unsaved badge ----------------------------------------
+let _badgeRAF = 0;
+function refreshDirty() {
+  if (_badgeRAF) return;
+  _badgeRAF = requestAnimationFrame(() => {
+    _badgeRAF = 0;
+    const el = $("#dirtyBadge"); if (!el) return;
+    const n = countEffective();
+    el.textContent = `${n} unsaved`;
+    el.classList.toggle("hidden", n === 0);
+  });
+}
+
+// ---- build review + apply --------------------------------------------------
+function countEffective() { return buildDiff().length; }
+
+function buildDiff() {
+  const s = saves[curSlot];
+  const rows = [];
+  const byRi = {}; (s.characters || []).forEach((c) => (byRi[c.rosterIndex] = c));
+
+  if ("potch" in SAVEDITS && SAVEDITS.potch !== s.potch) rows.push({ g: "Save", t: `Potch: ${s.potch} → ${SAVEDITS.potch}` });
+  if ("gameTime" in SAVEDITS && SAVEDITS.gameTime !== s.gameTimeSec) rows.push({ g: "Save", t: `Game time: ${gtLabel(s.gameTimeSec)} → ${gtLabel(SAVEDITS.gameTime)}` });
+  if (SAVEDITS.worldMapFull) rows.push({ g: "Save", t: `World map → mark fully explored` });
+
+  Object.entries(NAMES).forEach(([k, v]) => {
+    const n = (s.names || []).find((x) => x.key === k);
+    if (n && v !== n.value) rows.push({ g: "Names", t: `${n.label}: "${n.value}" → "${v}"` });
+  });
+
+  Object.entries(CE).forEach(([ri, f]) => {
+    const c = byRi[ri] || byRi[+ri] || {}; const who = c.name || `#${ri}`;
+    Object.entries(f).forEach(([k, v]) => {
+      if (k === "stats") Object.entries(v).forEach(([st, nv]) => { if (nv !== c.stats?.[st]) rows.push({ g: who, t: `${st}: ${c.stats?.[st]} → ${nv}` }); });
+      else if (k === "runes") Object.entries(v).forEach(([slot, nv]) => { if (nv !== (c.runes?.[+slot] || 0)) rows.push({ g: who, t: `Rune ${+slot + 1}: ${runeLabel(c.runes?.[+slot] || 0)} → ${runeLabel(nv)}` }); });
+      else if (k === "equip") Object.entries(v).forEach(([slot, nv]) => { if (nv !== (c.equip?.[slot] || 0)) rows.push({ g: who, t: `${GEAR_LABELS[slot] || slot}: ${itemLabel(c.equip?.[slot] || 0)} → ${itemLabel(nv)}` }); });
+      else if (k === "unites") Object.entries(v).forEach(([slot, nv]) => { const old = (c.unites || [])[+slot] || 0; if (nv !== old) { const un = (c.uniteNames || {})[slot]; rows.push({ g: who, t: `Unite ${un ? un.name : "#" + slot}: ${old} → ${nv}` }); } });
+      else if (k === "exp") { if (v !== c.exp) rows.push({ g: who, t: `Level ${lvFromExp(c.exp)} → ${lvFromExp(v)} (EXP ${c.exp} → ${v})` }); }
+      else if (k === "weaponLvl") { if (v !== c.weaponLvl) rows.push({ g: who, t: `Weapon Lv: ${c.weaponLvl} → ${v}` }); }
+      else if (k === "maxHP") { if (v !== c.maxHP) rows.push({ g: who, t: `Max HP: ${c.maxHP} → ${v}` }); }
+      else if (k === "recruited") { if (v !== c.recruited) rows.push({ g: who, t: `Recruitment: ${recName(c.recruited)} → ${recName(v)}` }); }
+    });
+  });
+  return rows;
+}
+function recName(v) { const r = REC_STATES.find((x) => x[0] === v); return r ? r[1] : `? (${v})`; }
+
+function openConfirm(rows, onConfirm, okLabel) {
+  const groups = {}; rows.forEach((r) => (groups[r.g] = groups[r.g] || []).push(r.t));
+  const body = Object.entries(groups).map(([g, ts]) =>
+    `<div class="cf-group"><div class="cf-g">${esc(g)}</div>${ts.map((t) => `<div class="cf-row">${esc(t)}</div>`).join("")}</div>`).join("");
+  const ov = document.createElement("div");
+  ov.className = "modal-ov";
+  ov.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="Review changes">
+      <div class="modal-h"><b>Review changes (${rows.length})</b><button class="modal-x" aria-label="close">✕</button></div>
+      <div class="cf-list">${body}</div>
+      <div class="modal-f"><button id="cfCancel">Cancel</button>
+        <button class="primary" id="cfOk">${esc(okLabel || "Apply & download")}</button></div></div>`;
+  document.body.appendChild(ov);
+  const close = modalA11y(ov, () => ov.remove(), $("#cfOk", ov));
+  $(".modal-x", ov).onclick = () => close(); $("#cfCancel", ov).onclick = () => close();
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  $("#cfOk", ov).onclick = () => { close(); onConfirm(); };
+}
+
+function applyEdits(mode) {   // mode: "download" | "file" | "share"
+  const diff = buildDiff();
+  if (!diff.length) return setStatus("No changes to apply.", "warn");
+  const okLabel = mode === "file" ? `Apply & save to ${origName}`
+    : mode === "share" ? "Apply & share…" : "Apply & download";
+  openConfirm(diff, () => doApply(mode), okLabel);
+}
+
+// Runs synchronously up to the first await, so navigator.share() (mode "share") still sees the
+// confirm-button's user activation. Uses the resolved PY (no await pyReady).
+async function doApply(mode) {
+  const py = PY; if (!py) return setStatus("Engine not ready.", "err");
+  const s = saves[curSlot];
+  const payload = { charEdits: CE, nameEdits: NAMES, saveEdits: SAVEDITS };
+  setStatus("Applying…", "");
+  let res;
+  try {
+    res = JSON.parse(py.runPython(
+      `apply_edits(${JSON.stringify(SAVE_PATH)}, ${JSON.stringify(s.folder)}, ${JSON.stringify(JSON.stringify(payload))})`));
+  } catch (e) { return setStatus("Write failed: " + e.message, "err"); }
+  if (res.error) return setStatus("Write failed: " + res.error, "err");
+  const bytes = py.FS.readFile(SAVE_PATH);
+
+  let msg;
+  if (mode === "share") {
+    const file = new File([bytes], downloadName(), { type: "application/octet-stream" });
+    try {
+      await navigator.share({ files: [file], title: origName, text: `${origName} (edited)` });
+      msg = `Applied ${res.changed} field(s) — shared ${downloadName()}.`;
+    } catch (e) {
+      if (e && e.name === "AbortError") { setStatus("Share cancelled — nothing left the device.", "warn"); return refreshAfterApply(py); }
+      downloadBytes(bytes, downloadName());
+      msg = `Applied ${res.changed} field(s). Share failed, downloaded ${downloadName()}.`;
+    }
+  } else if (mode === "file" && fileHandle) {
+    try {
+      if (!(await ensureWritable(fileHandle))) return setStatus("Save cancelled — write permission denied.", "warn");
+      const w = await fileHandle.createWritable();
+      await w.write(bytes); await w.close();
+      msg = `Saved — ${res.changed} field(s) changed, written to ${fileHandle.name}.`;
+    } catch (e) { return setStatus("Could not write file: " + e.message, "err"); }
+  } else {
+    downloadBytes(bytes, downloadName());
+    msg = `Saved — ${res.changed} field(s) changed. Downloaded ${downloadName()}. Copy it back into your emulator's memory-card location.`;
+  }
+  refreshAfterApply(py);
+  setStatus(msg, "ok");
+}
+
+function refreshAfterApply(py) {
+  const out = JSON.parse(py.runPython(`load_saves(${JSON.stringify(SAVE_PATH)})`));
+  if (out.saves) saves = out.saves;
+  const bytes = py.FS.readFile(SAVE_PATH);
+  rememberSave(origName, bytes, fileHandle);
+  drawSlot();
+}
+
 function downloadName() {
   const dot = origName.lastIndexOf(".");
   const stem = dot > 0 ? origName.slice(0, dot) : origName;
@@ -132,207 +624,106 @@ function downloadBytes(bytes, name) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-// ---------- render the loaded saves ----------
-const GEAR_LABELS = { head: "Head", body: "Body", hands: "Hands", feet: "Feet", acc1: "Accessory 1", acc2: "Accessory 2", acc3: "Accessory 3" };
-const STATS = ["STR", "SKL", "MAG", "EVA", "PDF", "MDF", "SPD", "LUK"];
-const REC_STATES = [[0, "Not Recruited"], [1, "In Your Company"], [10, "Recruited"], [11, "In Party"], [15, "Permanently In Party"]];
-
-function charCard(sv, c) {
-  const st = c.stats, cid = esc(sv.folder) + "|" + c.rosterIndex;
-  const cell = (f, v, mx) => `<input type="number" min="0" max="${mx}" value="${v}" data-def="${v}" data-ch="${cid}|${f}">`;
-  // Level is derived: lvl = EXP//1000 + 1. The Lv input just drives the EXP field; only EXP is written.
-  const lv = Math.min(99, Math.floor((c.exp || 0) / 1000) + 1);
-  const statTable = `<div class="tablewrap"><table class="savetbl"><thead><tr>` +
-    `<th>Lv</th><th>EXP</th><th>Wpn Lv</th><th>Max HP</th>${STATS.map(k => `<th>${k}</th>`).join("")}</tr></thead><tbody><tr>` +
-    `<td><input type="number" min="1" max="99" value="${lv}" title="Level (writes EXP = (Lv−1)×1000)"
-       oninput="const e=this.closest('tr').querySelector('[data-ch$=&quot;|exp&quot;]');if(e&&this.value){e.value=(Math.min(99,Math.max(1,+this.value))-1)*1000;e.dispatchEvent(new Event('input',{bubbles:true}));}"></td>` +
-    `<td>${cell("exp", c.exp || 0, 98999)}</td>` +
-    `<td>${cell("weaponLvl", c.weaponLvl || 0, 15)}</td>` +
-    `<td>${cell("maxHP", c.maxHP, 9999)}</td>` +
-    STATS.map(k => `<td>${cell("stat:" + k, st[k], 999)}</td>`).join("") + `</tr></tbody></table></div>`;
-
-  const rune = (slot, label) => {
-    const cur = c.runes[slot];
-    const opts = RUNE_LIST.map(r => `<option value="${r.id}"${r.id === cur ? " selected" : ""}>${esc(r.name)}</option>`).join("");
-    return `<div class="fld"><label>${label}</label><select data-def="${cur}" data-ch="${cid}|rune:${slot}">${opts}</select></div>`;
-  };
-  const gear = (key, label) => {
-    const cur = (c.equip || {})[key] || 0;
-    const opts = ITEM_OPTS.replace(`value="${cur}">`, `value="${cur}" selected>`);
-    return `<div class="fld"><label>${label}</label><select data-def="${cur}" data-ch="${cid}|equip:${key}">${opts}</select></div>`;
-  };
-
-  const rcur = (c.recruited === undefined) ? null : c.recruited;
-  const unrec = rcur !== null && rcur === 0;
-  const recSel = rcur === null ? "" : `<select class="recsel" data-def="${rcur}" data-ch="${cid}|recruited" onclick="event.stopPropagation()" title="Recruitment status — the flag the game itself checks">${
-    REC_STATES.map(([v, l]) => `<option value="${v}"${v === rcur ? " selected" : ""}>${l}</option>`).join("")
-  }${REC_STATES.some(([v]) => v === rcur) ? "" : `<option value="${rcur}" selected>? (${rcur})</option>`}</select>`;
-
-  const unites = Object.keys(c.uniteNames || {}).length
-    ? `<div class="seclabel">Unite Attacks <span class="mut" style="font-weight:400;text-transform:none;letter-spacing:0">(level 0–3)</span></div>
-       <div class="unites">${Object.entries(c.uniteNames).map(([s, u]) =>
-        `<label class="ufld" title="${esc(u.with || "")}"><input type="number" class="unite" min="0" max="3" value="${(c.unites || [])[+s] || 0}" data-def="${(c.unites || [])[+s] || 0}" data-ch="${cid}|unite:${s}"> ${esc(u.name)}</label>`).join("")}
-       </div>` : "";
-
-  return `<div class="charcard${unrec ? " unrec" : ""}" data-name="${esc(c.name.toLowerCase())}" data-ri="${c.rosterIndex}" data-data="${c.hasData ? 1 : 0}">
-    <div class="charhead"><span>${esc(c.name)}</span><span class="lvl">#${c.rosterIndex}</span>${recSel}</div>
-    ${statTable}
-    <div class="seclabel">Runes</div>
-    <div class="grid g3">${rune(0, "Rune 1")}${rune(1, "Rune 2")}${rune(2, "Rune 3")}</div>
-    ${unites}
-    <div class="seclabel">Equipment</div>
-    <div class="grid g4">${EQUIP_SLOTS.map(([k]) => gear(k, GEAR_LABELS[k] || k)).join("")}</div>
-  </div>`;
-}
-
-function renderSaves() {
-  const many = saves.length > 1;   // collapse each save when there are several
-  $("#saveout").innerHTML = saves.map(sv => {
-    const cksum = sv.checksumValid ? '<span class="badge ok">checksum ok</span>' : '<span class="badge ro">checksum off</span>';
-    const nameRows = (sv.names || []).map(n => `<tr><td class="mut">${esc(n.label)}</td>
-      <td><input type="text" class="mono" data-def="${esc(n.value)}" data-name="${esc(n.folder)}|${esc(n.key)}" value="${esc(n.value)}" maxlength="${n.max}" size="18"></td></tr>`).join("");
-    const chars = (sv.characters || []).map(c => charCard(sv, c)).join("");
-    const f = esc(sv.folder);
-    const nrec = (sv.characters || []).filter(c => (c.recruited || 0) >= 10).length;
-    const gt = sv.gameTimeSec || 0;
-    return `<div class="card savecard${many ? " collapsed" : ""}">
-      <div class="savebar" onclick="toggleSave('${f}')" title="click to expand / collapse">
-        <span class="caret">▸</span>
-        <b>${esc(sv.label)}</b>${sv.region ? ` <span class="rgn">${esc(sv.region)}</span>` : ""} ${cksum}
-        <span class="mono mut">${esc((sv.meta && sv.meta.title) || "")}</span>
-        <span class="mut" style="font-size:12px">${nrec} recruited</span>
-        ${sv.container && sv.container !== "memcard" ? `<span class="rgn" style="background:var(--acc)">${esc(sv.container.toUpperCase())}</span>` : ""}
-        <span class="sp"></span>
-        ${sv.writable === false
-          ? `<span class="badge ro" title="${esc(sv.note || "read-only container — convert to .ps2/.cbs/.psu to edit")}">read-only</span>`
-          : `<button class="pri" onclick="event.stopPropagation();writeSave('${f}',this)">Apply &amp; download</button>`}
-      </div>
-      <div class="savebody">
-        <div class="seclabel">Names &amp; Money</div>
-        <table class="nametbl"><tbody>${nameRows}
-          <tr><td class="mut">Potch</td><td><input type="number" class="mono" min="0" max="99999999" value="${sv.potch || 0}" data-def="${sv.potch || 0}" data-save="${f}|potch" style="width:120px"></td></tr>
-          <tr><td class="mut">Game time</td><td><input type="number" class="mono" min="0" max="3596400" value="${gt}" data-def="${gt}" data-save="${f}|gameTime" style="width:120px"> <span class="mut">seconds = ${Math.floor(gt / 3600)}h${String(Math.floor((gt % 3600) / 60)).padStart(2, "0")}m</span></td></tr>
-          <tr><td class="mut">World map</td><td>${sv.worldMapPct !== undefined ? sv.worldMapPct + "% explored" : ""}
-            <label class="mut" style="margin-left:10px"><input type="checkbox" data-save="${f}|worldMapFull"> mark fully explored on write</label></td></tr>
-        </tbody></table>
-        <div class="seclabel" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Characters
-          <input type="search" placeholder="filter by name or #…" oninput="filterChars('${f}',this.value)" style="width:200px;font-weight:400">
-          <label class="mut" style="font-weight:400"><input type="checkbox" onchange="withdataChars('${f}',this.checked)"> only non-default</label>
-        </div>
-        <div id="chars-${f}" class="chars">${chars}</div>
-      </div>
-    </div>`;
-  }).join("");
-  applyCharFilters();
-}
-
-// expand / collapse one save card
-function toggleSave(folder) {
-  const card = document.querySelector(`#chars-${CSS.escape(folder)}`)?.closest(".savecard");
-  if (card) card.classList.toggle("collapsed");
-}
-
-// per-folder character filter state
-const CHARFILT = {};
-function filterChars(folder, q) { (CHARFILT[folder] = CHARFILT[folder] || {}).q = q.toLowerCase(); applyCharFilters(); }
-function withdataChars(folder, on) { (CHARFILT[folder] = CHARFILT[folder] || {}).data = on; applyCharFilters(); }
-function applyCharFilters() {
-  document.querySelectorAll(".chars").forEach(box => {
-    const folder = box.id.slice("chars-".length);
-    const st = CHARFILT[folder] || {}; const q = st.q || ""; const dataOnly = !!st.data;
-    box.querySelectorAll(".charcard").forEach(card => {
-      const okQ = !q || card.dataset.name.includes(q) || card.dataset.ri === q;
-      const okD = !dataOnly || card.dataset.data === "1";
-      card.style.display = (okQ && okD) ? "" : "none";
-    });
-  });
-}
-
-// dirty-field highlight: compare each edited control to its loaded default
-document.addEventListener("input", e => {
-  const el = e.target;
-  if (!(el.dataset && (el.dataset.ch || el.dataset.name || el.dataset.save))) return;
-  if (el.type === "checkbox") return;
-  if ("def" in el.dataset) el.classList.toggle("dirty", String(el.value) !== String(el.dataset.def));
-});
-
-// ---------- write + download ----------
-async function writeSave(folder, btn) {
-  const py = await pyReady;
-  const charEdits = {}, nameEdits = {}, saveEdits = {};
-  for (const el of document.querySelectorAll(`[data-ch^="${folder}|"]`)) {
-    const [, ridx, field] = el.dataset.ch.split("|");
-    charEdits[ridx] = charEdits[ridx] || {};
-    if (field.startsWith("stat:")) { charEdits[ridx].stats = charEdits[ridx].stats || {}; charEdits[ridx].stats[field.slice(5)] = +el.value; }
-    else if (field.startsWith("rune:")) { charEdits[ridx].runes = charEdits[ridx].runes || {}; charEdits[ridx].runes[field.slice(5)] = +el.value; }
-    else if (field.startsWith("equip:")) { charEdits[ridx].equip = charEdits[ridx].equip || {}; charEdits[ridx].equip[field.slice(6)] = +el.value; }
-    else if (field.startsWith("unite:")) { charEdits[ridx].unites = charEdits[ridx].unites || {}; charEdits[ridx].unites[field.slice(6)] = +el.value; }
-    else charEdits[ridx][field] = +el.value;
-  }
-  for (const el of document.querySelectorAll(`[data-name^="${folder}|"]`)) {
-    nameEdits[el.dataset.name.split("|")[1]] = el.value;
-  }
-  for (const el of document.querySelectorAll(`[data-save^="${folder}|"]`)) {
-    const key = el.dataset.save.split("|")[1];
-    const v = el.type === "checkbox" ? (el.checked ? 1 : 0) : +el.value;
-    if (el.type !== "checkbox" || v) saveEdits[key] = v;   // only send checkbox actions when ticked
-  }
-  const payload = { charEdits, nameEdits, saveEdits };
-  const res = await withBusy(btn, async () => {
-    const out = py.runPython(
-      `apply_edits(${JSON.stringify(SAVE_PATH)}, ${JSON.stringify(folder)}, ${JSON.stringify(JSON.stringify(payload))})`);
-    return JSON.parse(out);
-  });
-  if (res.error) { setStatus(folder, "Write failed: " + res.error, "err"); return; }
-  // pull the edited bytes straight out of MEMFS and hand them to the browser
-  downloadBytes(py.FS.readFile(SAVE_PATH), downloadName());
-  if (res.saves) { saves = res.saves; renderSaves(); }
-  setStatus(folder, `Downloaded ${downloadName()} — ${res.changed} field(s) changed, checksum recomputed. Copy it back into your emulator's memory-card location.`, "ok");
-}
-
-function setStatus(folder, msg, kind) {
-  const bar = document.querySelector(`#chars-${CSS.escape(folder)}`)?.closest(".savecard")?.querySelector(".savebody");
-  if (!bar) { alert(msg); return; }
-  let s = bar.querySelector(".status");
-  if (!s) { s = document.createElement("div"); bar.prepend(s); }
-  s.className = "status " + (kind || "");
-  s.textContent = msg;
-}
-
-// ---------- reference tab ----------
+// ---- Reference tab ---------------------------------------------------------
+let refRendered = false;
 function renderReference() {
   refRendered = true;
-  const s = $("#t-ref");
+  const s = $("#refRoot");
   s.innerHTML = `<div class="card"><div class="row">
-    <b>Reference</b><span class="mut">${REF.chars.length} characters · ${REF.items.length} items · ${REF.runes.length} runes</span>
-    <span class="sp"></span><input type="search" id="rq" placeholder="filter…" oninput="renderRefTable()"></div>
+    <b class="acc2">Reference</b><span class="muted">${REF.chars.length} characters · ${REF.items.length} items · ${REF.runes.length} runes</span>
+    <span style="flex:1"></span><input class="search" id="rq" placeholder="filter…" style="max-width:220px"></div>
     <div class="row" style="margin-top:8px">
-     <select id="rkind" onchange="renderRefTable()">
-      <option value="chars">Characters</option><option value="items">Items</option>
-      <option value="runes">Runes</option></select></div>
-    <div id="reftbl" class="scroll" style="margin-top:10px"></div></div>`;
+      <select id="rkind" style="max-width:200px">
+       <option value="chars">Characters</option><option value="items">Items</option>
+       <option value="runes">Runes</option></select></div>
+    <div id="reftbl" style="margin-top:10px;max-height:60vh;overflow:auto"></div></div>`;
+  $("#rkind").onchange = renderRefTable;
+  $("#rq").oninput = renderRefTable;
   renderRefTable();
 }
 function renderRefTable() {
   const kind = $("#rkind").value, q = ($("#rq").value || "").toLowerCase();
-  const rows = REF[kind].filter(x => !q || JSON.stringify(x).toLowerCase().includes(q));
-  const cols = kind === "chars" ? ["index", "name"] : ["id", "name"];
-  const html = `<table><thead><tr>${cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>`
-    + rows.slice(0, 600).map(x => `<tr>${cols.map(c => `<td class="${c === "id" || c === "index" ? "mono" : ""}">${esc(c === "id" ? "0x" + x[c].toString(16).toUpperCase().padStart(4, "0") : x[c])}</td>`).join("")}</tr>`).join("")
-    + `</tbody></table>` + (rows.length > 600 ? `<p class="mut" style="padding:8px">showing 600 of ${rows.length}</p>` : "");
-  $("#reftbl").innerHTML = html;
+  const src = kind === "chars" ? REF.chars.map((c) => ({ id: c.index, name: c.name })) : REF[kind];
+  const rows = src.filter((x) => !q || x.name.toLowerCase().includes(q) || hx(x.id, 4).toLowerCase().includes(q) || String(x.id) === q);
+  const idLabel = kind === "chars" ? (id) => "#" + id : (id) => "0x" + hx(id, kind === "runes" ? 2 : 4);
+  $("#reftbl").innerHTML = `<table class="invtbl"><thead><tr><th>${kind === "chars" ? "Index" : "ID"}</th><th>Name</th></tr></thead><tbody>`
+    + rows.slice(0, 600).map((x) => `<tr><td class="sl">${idLabel(x.id)}</td><td>${esc(x.name)}</td></tr>`).join("")
+    + `</tbody></table>` + (rows.length > 600 ? `<div class="muted" style="padding:8px">showing 600 of ${rows.length}</div>` : "");
 }
 
-// ---------- PWA ----------
-function registerPWA() {
+// ---- misc ------------------------------------------------------------------
+function setStatus(msg, kind) { const el = $("#status"); if (el) { el.textContent = msg; el.className = "status" + (kind ? " " + kind : ""); } }
+function setDropMsg(msg, isErr) { const el = $("#engineStatus"); if (el) el.innerHTML = (isErr ? "⚠ " : "") + esc(msg); }
+function bootProgress(pct, msg) {
+  const el = $("#engineStatus"); if (!el) return;
+  el.innerHTML = `<div class="bootmsg">${pct < 100 ? '<span class="spinner"></span>' : ""}${esc(msg)}</div>` +
+    `<div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>`;
+}
+function dirtyNow() { try { return typeof CE !== "undefined" && buildDiff().length > 0; } catch (e) { return false; } }
+
+// ---- theme -----------------------------------------------------------------
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "");
+  $$("footer .tb").forEach((b) => b.classList.toggle("on", b.dataset.theme === t));
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = t === "light" ? "#eaf4f7" : "#0a141e";
+  try { localStorage.setItem("s4editor-theme", t); } catch (e) {}
+}
+
+// ---- mode tabs -------------------------------------------------------------
+function setMode(mode) {
+  $$(".modebar .mtab").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
+  $("#mode-save").classList.toggle("hidden", mode !== "save");
+  $("#mode-ref").classList.toggle("hidden", mode !== "ref");
+  if (mode === "ref" && !refRendered && PY) renderReference();
+}
+
+// ---- wire up ---------------------------------------------------------------
+window.addEventListener("DOMContentLoaded", () => {
+  let theme = "ocean";
+  try { theme = localStorage.getItem("s4editor-theme") || "ocean"; } catch (e) {}
+  applyTheme(theme);
+  $$("footer .tb").forEach((b) => (b.onclick = () => applyTheme(b.dataset.theme)));
+  $$(".modebar .mtab").forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
+
+  const drop = $("#drop"), fileInput = $("#file"), pickBtn = $("#pickBtn");
+  pickBtn.onclick = () => (SUPPORTS_FS ? openViaPicker() : fileInput.click());
+  fileInput.onchange = () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); };
+  ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("hot"); }));
+  ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("hot"); }));
+  drop.addEventListener("drop", async (e) => {
+    const item = e.dataTransfer.items && e.dataTransfer.items[0];
+    if (SUPPORTS_FS && item && item.getAsFileSystemHandle) {
+      try {
+        const h = await item.getAsFileSystemHandle();
+        if (h && h.kind === "file") return handleFile(await h.getFile(), h);
+      } catch (err) { /* fall through */ }
+    }
+    const f = e.dataTransfer.files[0]; if (f) handleFile(f);
+  });
+
+  window.addEventListener("beforeunload", (e) => { if (dirtyNow()) { e.preventDefault(); e.returnValue = ""; } });
+
+  pyReady = bootPyodide();
+  pyReady.then(() => {
+    setDropMsg("Python engine ready — load a save file.", false);
+    pickBtn.disabled = false;
+    if (!$("#mode-ref").classList.contains("hidden") && !refRendered) renderReference();
+  }).catch((e) => { setDropMsg("Engine failed to start: " + e.message, true); });
+  pyReady.then(async () => {
+    const shared = await pickupSharedFile();
+    if (!shared) showRecent();
+  }).catch(() => {});
+
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch(e => console.warn("SW register failed", e));
+    navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW register failed", e));
   }
+
   const installBtn = $("#installBtn");
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
   let deferredPrompt = null;
   if (!standalone) {
-    window.addEventListener("beforeinstallprompt", e => {
+    window.addEventListener("beforeinstallprompt", (e) => {
       e.preventDefault();
       deferredPrompt = e;
       installBtn.classList.remove("hidden");
@@ -346,29 +737,4 @@ function registerPWA() {
     };
     window.addEventListener("appinstalled", () => installBtn.classList.add("hidden"));
   }
-}
-
-// ---------- boot wiring ----------
-window.addEventListener("DOMContentLoaded", () => {
-  const drop = $("#drop");
-  const fileInput = $("#file");
-  const pickBtn = $("#pickBtn");
-  pickBtn.onclick = () => fileInput.click();
-  fileInput.onchange = () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); };
-  ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("hot"); }));
-  ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("hot"); }));
-  drop.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) handleFile(f); });
-
-  pyReady = bootPyodide().then(py => {
-    REF = JSON.parse(py.runPython("load_reference()"));
-    RUNE_LIST = REF.runes || [];
-    ITEM_LIST = REF.items || [];
-    EQUIP_SLOTS = REF.equipSlots || [];
-    ITEM_OPTS = ITEM_LIST.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
-    setEngineStatus("Python engine ready — drop or choose a save file.", false);
-    pickBtn.disabled = false;
-    return py;
-  }).catch(e => { setEngineStatus("Engine failed to start: " + e.message, true); throw e; });
-
-  registerPWA();
 });

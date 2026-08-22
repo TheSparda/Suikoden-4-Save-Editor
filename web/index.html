@@ -1,62 +1,72 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0a141e">
-  <meta name="description" content="Edit Suikoden IV PS2 saves entirely on your device — nothing is uploaded.">
-  <title>Suikoden IV Save Editor (Web)</title>
-  <link rel="stylesheet" href="style.css">
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icons/icon-192.png">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a141e">
+<meta name="description" content="Edit Suikoden IV PS2 saves entirely on your device — nothing is uploaded.">
+<title>Suikoden IV Save Editor (Web)</title>
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="S4 Save Editor">
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <h1>Suikoden IV <span>Save Editor</span></h1>
-      <span class="sp"></span>
-      <button id="installBtn" class="chip hidden">⬇ Install app</button>
-      <button class="chip" onclick="toggleTheme()">◐ Theme</button>
-    </header>
+<div class="wrap">
+  <header>
+    <h1>Suikoden IV Save Editor</h1>
+    <span class="tag">web · runs on your device</span>
+    <button id="installBtn" class="chip hidden" style="margin-left:auto">⬇ Install app</button>
+  </header>
 
-    <div class="tabs">
-      <div class="tab on" data-t="save" onclick="tab('save')">Save Editor</div>
-      <div class="tab" data-t="ref" onclick="tab('ref')">Reference</div>
+  <nav class="modebar">
+    <button class="mtab on" data-mode="save">Save Editor</button>
+    <button class="mtab" data-mode="ref">Reference</button>
+  </nav>
+
+  <section id="mode-save" class="mode">
+    <p class="sub">Full save editor — recruitment, level/EXP, stats, HP, runes, unite attacks,
+      equipment, names, Potch and more. Everything runs in your browser via Python (Pyodide);
+      your save <b>never leaves the device</b>. Works on desktop and Android. A backup is always wise.</p>
+
+    <div class="card" id="loaderCard">
+      <h2>1 · Load save</h2>
+      <div class="drop" id="drop">
+        <div><b>Drop a PS2 save file here</b> or</div>
+        <label class="file"><button type="button" id="pickBtn" disabled>Choose file…</button>
+          <input type="file" id="file"></label>
+        <div class="muted" style="margin-top:10px" id="engineStatus">
+          <span class="spinner"></span>Starting Python engine…</div>
+        <div class="muted" style="margin-top:6px">Memory cards (.ps2 .mcd .mc2 .bin) and exported
+          saves (.cbs .psu .sps read/write · .max .psv read-only).</div>
+      </div>
+      <div id="recent"></div>
     </div>
 
-    <main>
-      <section id="t-save">
-        <div class="card" id="loaderCard">
-          <div class="drop" id="drop">
-            <div><b>Drop a PS2 save file here</b> — or</div>
-            <label class="file">
-              <button type="button" id="pickBtn" disabled>Choose file…</button>
-              <input type="file" id="file">
-            </label>
-            <div class="mut" id="engineStatus"><span class="spinner"></span>Starting Python engine…</div>
-            <div class="mut">Supports memory cards (.ps2 .mcd .mc2 .bin) and exported saves (.cbs .psu .sps read/write · .max .psv read-only).</div>
-          </div>
-          <div class="note" style="margin-top:12px">
-            Everything runs on your device — the save file is never uploaded. Edits recompute the
-            gamedata checksum (and memory-card ECC) so the game loads the save normally. You download
-            an edited <em>copy</em>; your original file is untouched.
-          </div>
-        </div>
-        <div id="saveout"></div>
-      </section>
+    <div id="editor"></div>
+  </section>
 
-      <section id="t-ref" hidden></section>
-    </main>
+  <section id="mode-ref" class="mode hidden">
+    <p class="sub">Browse the verified reference tables — all 113 characters, 519 items, and 42
+      runes with their in-game ids.</p>
+    <div id="refRoot"></div>
+  </section>
 
-    <footer class="appfoot">
-      Made by <b>Sparda</b> ·
+  <footer>
+    <button class="tb" data-theme="ocean">Ocean</button>
+    <button class="tb" data-theme="light">Daylight</button>
+    <span class="credit">Made by <b>Sparda</b> ·
       <a href="https://github.com/TheSparda/Suikoden-4-Save-Editor" target="_blank" rel="noopener noreferrer">GitHub</a>
-      · v1.2.0
-    </footer>
-  </div>
+      · v1.3.0</span>
+    <span class="note">Client-side Pyodide port of <code>s4save.py</code> — full parity with the
+      desktop save editor, nothing uploaded, works everywhere including Android.</span>
+  </footer>
+</div>
 
-  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
-  <script src="app.js"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

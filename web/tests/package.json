@@ -1,0 +1,8 @@
+{
+  "name": "s4-web-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node validate.mjs && node save-roundtrip.mjs"
+  }
+}
