@@ -77,5 +77,34 @@ const app = fs.readFileSync(path.join(WEB, "app.js"), "utf8");
 (/read_all_s4_saves/.test(app) && /write_save_edits/.test(app) ? ok : bad)("app.js drives read_all_s4_saves + write_save_edits");
 (/make_backup=False/.test(app) ? ok : bad)("write passes make_backup=False (never litters MEMFS)");
 
+// 6) reference-data enrichment: affinities (B13) — data valid + covers the playable cast
+console.log("Affinity reference (B13):");
+const aff = JSON.parse(fs.readFileSync(path.join(ED, "s4_affinities.json"), "utf8"));
+const affEntries = Object.entries(aff).filter(([k]) => !k.startsWith("_"));
+const affBad = affEntries.filter(([, v]) => !Array.isArray(v) || v.length !== 5 || v.some((x) => x < 1 || x > 4));
+(affEntries.length >= 40 ? ok : bad)(`affinity entries: ${affEntries.length}`);
+(affBad.length === 0 ? ok : bad)("every affinity is [5] with values 1–4" + (affBad.length ? " (bad: " + affBad.map((x) => x[0]).join(", ") + ")" : ""));
+// coverage against the roster, honouring the one alias in app.js
+const roster = new Set(Object.values(chars));
+const ALIAS = { Frederica: "Fredrica" };   // must match AFF_ALIAS in app.js
+const resolvable = [...roster].filter((n) => aff[n] || aff[ALIAS[n]]).length;
+(resolvable >= 40 ? ok : bad)(`roster characters with an affinity note: ${resolvable}`);
+(/AFF_ALIAS\s*=\s*{\s*"Frederica"\s*:\s*"Fredrica"/.test(app) ? ok : bad)("app.js carries the Frederica→Fredrica alias");
+(/s4_affinities\.json/.test(app) ? ok : bad)("app.js fetches s4_affinities.json (defensively)");
+
+// 7) v2 depth features wired: presets (B18) + PWA force-refresh/version check (B17)
+console.log("Depth features (B17/B18):");
+(/applyPreset\(/.test(app) && /data-preset/.test(app) ? ok : bad)("per-character 'Max out' preset wired");
+(/id="maxPotch"/.test(app) ? ok : bad)("'max' Potch preset wired");
+(/function forceRefresh/.test(app) && /caches\.delete/.test(app) && /unregister/.test(app) ? ok : bad)("force-refresh clears SW + caches");
+(/checkVersionBehind/.test(app) && /cache:\s*"no-store"/.test(app) ? ok : bad)("version-behind check (cache-busted, no-store)");
+(/id="forceRefresh"/.test(html) && /id="updateBanner"/.test(html) ? ok : bad)("index.html has the force-refresh button + update banner");
+
+// 8) version lockstep: app.js APP_VERSION === index.html footer version (B12 corollary)
+console.log("Version lockstep:");
+const appVer = (/APP_VERSION\s*=\s*"(\d+\.\d+\.\d+)"/.exec(app) || [])[1];
+const htmlVer = (/·\s*v(\d+\.\d+\.\d+)/.exec(html) || [])[1];
+(appVer && appVer === htmlVer ? ok : bad)(`APP_VERSION (${appVer}) matches footer (${htmlVer})`);
+
 console.log(failures ? `\nFAILED (${failures})` : "\nAll checks passed.");
 process.exit(failures ? 1 : 0);

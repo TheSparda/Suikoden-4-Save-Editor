@@ -104,6 +104,19 @@ details[open] .chev { transform:rotate(90deg); }
 .char-body { padding:0 14px 14px; }
 .char-body h4 { font-size:11px; color:var(--mut); text-transform:uppercase; letter-spacing:.06em; margin:14px 0 8px; }
 
+/* reference-data enrichment notes (B13) — inform without competing with the input */
+.fnote { font-size:12px; color:var(--mut); margin:2px 2px 6px; line-height:1.6; }
+.fnote .aff { padding:1px 7px; border-radius:999px; border:1px solid var(--line); white-space:nowrap; }
+.aff.a1 { color:var(--crimson); border-color:var(--crimson); }
+.aff.a2 { color:var(--mut); }
+.aff.a3 { color:var(--acc); border-color:var(--acc); }
+.aff.a4 { color:var(--acc2); border-color:var(--acc2); font-weight:600; }
+.presets { align-items:center; }
+
+/* PWA update banner (B17) */
+.updatebanner { margin:10px 0 0; padding:10px 14px; border:1px solid var(--acc); border-radius:10px;
+  background:var(--changed-bg); color:var(--ink); font-size:13px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+
 .slotbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .warnbox { color:var(--warn); font-size:12px; margin:0 2px 10px; border-left:2px solid var(--warnbd); padding-left:8px; }
 

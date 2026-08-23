@@ -17,6 +17,13 @@ const STAT_NAMES = ["STR", "SKL", "MAG", "EVA", "PDF", "MDF", "SPD", "LUK"];
 const GEAR_LABELS = { head: "Head", body: "Body", hands: "Hands", feet: "Feet",
                       acc1: "Accessory 1", acc2: "Accessory 2", acc3: "Accessory 3" };
 const CHAR_CAP = { maxHP: 9999, exp: 98999, weaponLvl: 15 };
+const POTCH_MAX = 99999999;
+const APP_VERSION = "1.4.0";        // keep in lockstep with the footer in index.html
+// Elemental rune affinity reference (s4_affinities.json) — teaches which runes suit a unit.
+const AFF_ELEMS = ["Fire", "Lightning", "Water", "Wind", "Earth"];
+const AFF_RATE = { 1: "poor", 2: "average", 3: "good", 4: "excellent" };
+const AFF_ALIAS = { "Frederica": "Fredrica" };   // roster name → affinity-table key
+let AFF = {};                        // character name → [5] affinity ratings
 
 let pyReady = null, PY = null;      // PY = resolved pyodide (sync access keeps share() in-gesture)
 let REF = { runes: [], items: [], equipSlots: [], chars: [] };
@@ -112,10 +119,15 @@ def load_reference():
   REF.items.forEach((i) => (ITEM_BY_ID[i.id] = i));
   REF.runes.forEach((r) => (RUNE_BY_ID[r.id] = r));
   EQUIP_SLOTS = REF.equipSlots || [];
+  // Reference-data enrichment (defensive: a missing file just hides the notes).
+  try { const a = await (await fetch(`${EDITOR_DIR}/s4_affinities.json`)).json(); delete a._note; AFF = a; }
+  catch (e) { AFF = {}; }
   PY = py;
   bootProgress(100, "Ready");
   return py;
 }
+// character name → affinity ratings (with the one roster/table alias), or null
+function affFor(name) { return AFF[name] || AFF[AFF_ALIAS[name]] || null; }
 
 // ---- label helpers ---------------------------------------------------------
 function itemLabel(id) { return id ? (ITEM_BY_ID[id]?.name || "#" + id) : "— empty —"; }
@@ -304,7 +316,7 @@ function drawSlot() {
       <div class="grid">${names}</div>
       <h3 class="sec">Money &amp; time</h3>
       <div class="grid">
-        <label class="field"><span>Potch</span>
+        <label class="field"><span>Potch <button type="button" class="chip mini" id="maxPotch">max</button></span>
           <input type="number" min="0" max="99999999" id="potchfld"
                  value="${s.potch || 0}" data-def="${s.potch || 0}"></label>
         <label class="field"><span>Game time (seconds) — <span id="gtlabel">${gtLabel(s.gameTimeSec)}</span></span>
@@ -344,6 +356,10 @@ function drawSlot() {
   const potch = $("#potchfld"); if (potch) potch.oninput = () => {
     potch.classList.toggle("dirty", potch.value !== potch.dataset.def);
     SAVEDITS.potch = +potch.value; refreshDirty();
+  };
+  const maxP = $("#maxPotch"); if (maxP && potch) maxP.onclick = () => {
+    potch.value = POTCH_MAX; potch.classList.toggle("dirty", String(POTCH_MAX) !== potch.dataset.def);
+    SAVEDITS.potch = POTCH_MAX; refreshDirty();
   };
   const gt = $("#gtfld"); if (gt) gt.oninput = () => {
     gt.classList.toggle("dirty", gt.value !== gt.dataset.def);
@@ -417,6 +433,12 @@ function charCard(c) {
   const recOpts = REC_STATES.map(([v, l]) => `<option value="${v}"${v === c.recruited ? " selected" : ""}>${l}</option>`).join("") +
     (REC_STATES.some(([v]) => v === c.recruited) ? "" : `<option value="${c.recruited}" selected>? (${c.recruited})</option>`);
 
+  // B13 reference enrichment: elemental rune affinity (which runes suit this unit)
+  const aff = affFor(c.name);
+  const affNote = aff ? `<div class="fnote">Rune affinity: ${aff.map((v, i) =>
+      `<span class="aff a${v}" title="${AFF_ELEMS[i]} — ${AFF_RATE[v]}">${AFF_ELEMS[i]} ${v}</span>`).join(" · ")}
+      <span class="muted">(1 poor–4 excellent · GameFAQs affinity FAQ)</span></div>` : "";
+
   return `<details class="char${unrec ? " unrec" : ""}"><summary>
       <span class="chev">▸</span><span class="nm">${esc(c.name)}</span>
       <span class="muted">#${ri}</span>
@@ -425,9 +447,12 @@ function charCard(c) {
     <div class="char-body" data-roster="${ri}">
       <div class="row" style="gap:8px;margin:6px 0 2px"><span class="muted">Recruitment</span>
         <select data-recruit="${ri}" style="max-width:220px">${recOpts}</select></div>
+      <div class="row presets" style="gap:6px;margin:6px 0 2px"><span class="muted">Preset</span>
+        <button type="button" class="chip mini" data-preset="${ri}" title="stage max stats, HP, level, weapon Lv and all unites for review">★ Max out</button></div>
       <h4>Core</h4><div class="grid">${core}</div>
       <h4>Stats</h4><div class="grid">${stats}</div>
       <h4>Runes</h4><div class="grid eq">${runes}</div>
+      ${affNote}
       ${unites}
       <h4>Equipment</h4><div class="grid eq">${equip}</div>
     </div></details>`;
@@ -487,6 +512,25 @@ function wireChar(c) {
     ce(ri).recruited = +se.value;
     se.classList.toggle("dirty", +se.value !== c.recruited); refreshDirty();
   }));
+  // preset
+  $$("button[data-preset]", body).forEach((b) => (b.onclick = () => applyPreset(ri)));
+}
+
+// B18 preset — stage a full "max out" for one character (reviewable, revertible, per apply).
+function applyPreset(ri) {
+  const body = $(`.char-body[data-roster="${ri}"]`);
+  if (!body) return;
+  const e = ce(ri);
+  const mark = (inp, v) => { inp.value = v; inp.classList.toggle("dirty", String(v) !== inp.dataset.def); };
+  e.stats = e.stats || {};
+  $$('input[data-stat]', body).forEach((inp) => { mark(inp, 999); e.stats[inp.dataset.stat] = 999; });
+  const setK = (k, v) => { const inp = $(`input[data-k="${k}"]`, body); if (inp) mark(inp, v); e[k] = v; };
+  setK("maxHP", CHAR_CAP.maxHP); setK("weaponLvl", CHAR_CAP.weaponLvl); setK("exp", CHAR_CAP.exp);
+  const lvIn = $(`input[data-lv="${ri}"]`, body); if (lvIn) mark(lvIn, 99);
+  const us = $$('input[data-uri]', body);
+  if (us.length) { e.unites = e.unites || {}; us.forEach((inp) => { mark(inp, 3); e.unites[inp.dataset.uslot] = 3; }); }
+  refreshDirty();
+  setStatus(`Staged "Max out" for ${charByRoster(ri)?.name || "#" + ri} — review before applying.`, "");
 }
 
 // ---- dirty tracking / unsaved badge ----------------------------------------
@@ -635,7 +679,7 @@ function renderReference() {
     <div class="row" style="margin-top:8px">
       <select id="rkind" style="max-width:200px">
        <option value="chars">Characters</option><option value="items">Items</option>
-       <option value="runes">Runes</option></select></div>
+       <option value="runes">Runes</option><option value="aff">Rune affinities</option></select></div>
     <div id="reftbl" style="margin-top:10px;max-height:60vh;overflow:auto"></div></div>`;
   $("#rkind").onchange = renderRefTable;
   $("#rq").oninput = renderRefTable;
@@ -643,6 +687,13 @@ function renderReference() {
 }
 function renderRefTable() {
   const kind = $("#rkind").value, q = ($("#rq").value || "").toLowerCase();
+  if (kind === "aff") {
+    const names = Object.keys(AFF).filter((n) => !q || n.toLowerCase().includes(q)).sort();
+    $("#reftbl").innerHTML = `<table class="invtbl"><thead><tr><th>Character</th>${AFF_ELEMS.map((e) => `<th>${e}</th>`).join("")}</tr></thead><tbody>`
+      + (names.map((n) => `<tr><td>${esc(n)}</td>${(AFF[n] || []).map((v) => `<td><span class="aff a${v}" title="${AFF_RATE[v]}">${v}</span></td>`).join("")}</tr>`).join(""))
+      + `</tbody></table><div class="muted" style="padding:8px">1 poor – 4 excellent · order Fire · Lightning · Water · Wind · Earth · source: GameFAQs Rune Affinity FAQ (OmegaDL50)</div>`;
+    return;
+  }
   const src = kind === "chars" ? REF.chars.map((c) => ({ id: c.index, name: c.name })) : REF[kind];
   const rows = src.filter((x) => !q || x.name.toLowerCase().includes(q) || hx(x.id, 4).toLowerCase().includes(q) || String(x.id) === q);
   const idLabel = kind === "chars" ? (id) => "#" + id : (id) => "0x" + hx(id, kind === "runes" ? 2 : 4);
@@ -660,6 +711,37 @@ function bootProgress(pct, msg) {
     `<div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>`;
 }
 function dirtyNow() { try { return typeof CE !== "undefined" && buildDiff().length > 0; } catch (e) { return false; } }
+
+// ---- PWA staleness escape hatch (B17) --------------------------------------
+// Force refresh: unregister the SW, drop every cache, reload. The reliable escape hatch
+// when a stuck service worker keeps serving an old shell.
+async function forceRefresh() {
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); }
+  } catch (e) { /* best-effort */ }
+  location.reload();
+}
+// Version-behind check: cache-busted fetch of index.html bypasses HTTP + SW caches; if the
+// deployed footer version differs from the running one, offer an update.
+async function checkVersionBehind() {
+  try {
+    const r = await fetch(`index.html?cb=${Date.now()}`, { cache: "no-store" });
+    if (!r.ok) return;
+    const m = /·\s*v(\d+\.\d+\.\d+)/.exec(await r.text());
+    if (m && m[1] !== APP_VERSION) showUpdatePrompt(m[1]);
+  } catch (e) { /* offline / blocked — ignore */ }
+}
+function showUpdatePrompt(latest) {
+  const el = $("#updateBanner"); if (!el) return;
+  el.innerHTML = `A newer version (v${esc(latest)}) is available — you're on v${APP_VERSION}.
+    <button class="chip mini" id="ubUpdate">↻ Update now</button>`;
+  el.classList.remove("hidden");
+  $("#ubUpdate").onclick = forceRefresh;
+}
 
 // ---- theme -----------------------------------------------------------------
 function applyTheme(t) {
@@ -683,8 +765,10 @@ window.addEventListener("DOMContentLoaded", () => {
   let theme = "ocean";
   try { theme = localStorage.getItem("s4editor-theme") || "ocean"; } catch (e) {}
   applyTheme(theme);
-  $$("footer .tb").forEach((b) => (b.onclick = () => applyTheme(b.dataset.theme)));
+  $$("footer .tb[data-theme]").forEach((b) => (b.onclick = () => applyTheme(b.dataset.theme)));
   $$(".modebar .mtab").forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
+  const fr = $("#forceRefresh"); if (fr) fr.onclick = forceRefresh;
+  checkVersionBehind();
 
   const drop = $("#drop"), fileInput = $("#file"), pickBtn = $("#pickBtn");
   pickBtn.onclick = () => (SUPPORTS_FS ? openViaPicker() : fileInput.click());

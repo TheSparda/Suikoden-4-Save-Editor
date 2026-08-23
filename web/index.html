@@ -27,6 +27,8 @@
     <button class="mtab" data-mode="ref">Reference</button>
   </nav>
 
+  <div id="updateBanner" class="updatebanner hidden"></div>
+
   <section id="mode-save" class="mode">
     <p class="sub">Full save editor — recruitment, level/EXP, stats, HP, runes, unite attacks,
       equipment, names, Potch and more. Everything runs in your browser via Python (Pyodide);
@@ -58,9 +60,10 @@
   <footer>
     <button class="tb" data-theme="ocean">Ocean</button>
     <button class="tb" data-theme="light">Daylight</button>
+    <button class="tb" id="forceRefresh" title="unregister the service worker, clear caches, and reload — fixes a stale app">↻ Force refresh</button>
     <span class="credit">Made by <b>Sparda</b> ·
       <a href="https://github.com/TheSparda/Suikoden-4-Save-Editor" target="_blank" rel="noopener noreferrer">GitHub</a>
-      · v1.3.0</span>
+      · v1.4.0</span>
     <span class="note">Client-side Pyodide port of <code>s4save.py</code> — full parity with the
       desktop save editor, nothing uploaded, works everywhere including Android.</span>
   </footer>
