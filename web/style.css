@@ -85,6 +85,7 @@ input:focus, select:focus { outline:0; border-color:var(--acc); box-shadow:0 0 0
 input:hover:not(:focus), select:hover:not(:focus) { border-color:var(--acc); }
 input.dirty, select.dirty { color:var(--warn); border-color:var(--warnbd); background:var(--changed-bg); }
 
+.subtabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
 .search { width:100%; margin-bottom:10px; }
 .pill { padding:2px 9px; border-radius:999px; font-size:12px; background:var(--input-bg);
   border:1px solid var(--line); white-space:nowrap; color:var(--mut); }
@@ -124,6 +125,9 @@ details[open] .chev { transform:rotate(90deg); }
 .invtbl th { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); text-align:left; padding:6px 8px; font-weight:600; }
 .invtbl td { padding:6px 8px; border-top:1px solid var(--line); vertical-align:middle; }
 .invtbl td.sl { color:var(--mut); font-size:12px; width:70px; font-family:ui-monospace,Menlo,monospace; }
+.invtbl tr.dirtyrow td { background:var(--changed-bg); }
+.invtbl tr.unrec td { color:var(--mut); }
+.invtbl tr.unrec td:first-child { opacity:.75; }
 
 /* sticky action bar — opaque so content scrolls cleanly under it */
 .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; position:sticky; bottom:0;

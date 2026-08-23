@@ -18,7 +18,7 @@ const GEAR_LABELS = { head: "Head", body: "Body", hands: "Hands", feet: "Feet",
                       acc1: "Accessory 1", acc2: "Accessory 2", acc3: "Accessory 3" };
 const CHAR_CAP = { maxHP: 9999, exp: 98999, weaponLvl: 15 };
 const POTCH_MAX = 99999999;
-const APP_VERSION = "1.4.0";        // keep in lockstep with the footer in index.html
+const APP_VERSION = "1.5.0";        // keep in lockstep with the footer in index.html
 // Elemental rune affinity reference (s4_affinities.json) — teaches which runes suit a unit.
 const AFF_ELEMS = ["Fire", "Lightning", "Water", "Wind", "Earth"];
 const AFF_RATE = { 1: "poor", 2: "average", 3: "good", 4: "excellent" };
@@ -268,7 +268,7 @@ async function pickupSharedFile() {
 // ---- top-level editor render ----------------------------------------------
 // Per-slot staged edits (reset when switching slots). Only *touched* fields are staged,
 // so the review list and the write are minimal.
-let CE, NAMES, SAVEDITS, SEARCH, RECRUITED_ONLY;
+let CE, NAMES, SAVEDITS, SEARCH, RECRUITED_ONLY, SUB;
 
 function renderEditor() {
   const ed = $("#editor");
@@ -284,7 +284,7 @@ function renderEditor() {
 
 function drawSlot() {
   const s = saves[curSlot];
-  CE = {}; NAMES = {}; SAVEDITS = {}; SEARCH = ""; RECRUITED_ONLY = false;
+  CE = {}; NAMES = {}; SAVEDITS = {}; SEARCH = ""; RECRUITED_ONLY = false; SUB = "chars";
 
   const cksum = s.checksumValid ? `<span class="pill on">checksum ok</span>` : `<span class="pill">checksum off</span>`;
   const metaBits = [
@@ -307,9 +307,12 @@ function drawSlot() {
   const ro = s.writable === false;
   const roNote = ro ? `<div class="warnbox">${esc(s.note || "This container is read-only")} — convert it to a .ps2/.cbs/.psu to edit and save.</div>` : "";
 
+  const live = (s.characters || []).filter((c) => (c.recruited || 0) >= 10).length;
+  const total = (s.characters || []).length;
+
   $("#slotbody").innerHTML = `
     <div class="card">
-      <div class="muted" style="margin:-2px 0 8px">${metaBits}${s.checksumValid ? "" : " · "}</div>
+      <div class="muted" style="margin:-2px 0 8px">${metaBits}</div>
       <div class="row" style="margin-bottom:6px">${cksum}</div>
       ${roNote}
       <h3 class="sec">Names</h3>
@@ -328,12 +331,13 @@ function drawSlot() {
       </div>
     </div>
     <div class="card">
-      <div class="row" style="justify-content:space-between;margin-bottom:8px">
-        <h3 class="sec" style="margin:0">Characters</h3>
-        <label class="row" style="gap:6px;cursor:pointer"><input type="checkbox" id="reconly"> recruited only</label>
+      <div class="subtabs">
+        <button class="chip" data-sub="chars">Characters (${total})</button>
+        <button class="chip" data-sub="recruit">Recruit (${live})</button>
       </div>
       <input class="search" id="sq" placeholder="filter by name or #…">
-      <div id="charbox"></div>
+      <div class="muted" id="subhint" style="margin:2px 0 10px"></div>
+      <div id="subview"></div>
       <div class="toolbar">
         ${ro
           ? `<span class="status warn">Read-only container — editing disabled. Convert to .ps2/.cbs/.psu first.</span>`
@@ -348,7 +352,7 @@ function drawSlot() {
       </div>
     </div>`;
 
-  // wire names + money/time
+  // wire names + money/time (Overview card is always visible)
   $$("input[data-name]").forEach((inp) => (inp.oninput = () => {
     inp.classList.toggle("dirty", inp.value !== inp.dataset.def);
     NAMES[inp.dataset.name] = inp.value; refreshDirty();
@@ -370,31 +374,77 @@ function drawSlot() {
     wm.closest(".field")?.classList.toggle("dirty-soft", wm.checked); refreshDirty();
   };
 
-  const rc = $("#reconly"); if (rc) rc.onchange = () => { RECRUITED_ONLY = rc.checked; drawChars(); };
-  const sq = $("#sq"); if (sq) sq.oninput = () => { SEARCH = sq.value.toLowerCase(); drawChars(); };
+  // subtabs + search + toolbar
+  $$("[data-sub]").forEach((b) => (b.onclick = () => { SUB = b.dataset.sub; SEARCH = ""; const q = $("#sq"); if (q) q.value = ""; showSub(); }));
+  const sq = $("#sq"); if (sq) sq.oninput = () => { SEARCH = sq.value.toLowerCase(); showSub(); };
   const sb = $("#saveBtn"); if (sb) sb.onclick = () => applyEdits("download");
   const sfb = $("#saveFileBtn"); if (sfb) sfb.onclick = () => applyEdits("file");
   const shb = $("#shareBtn"); if (shb) shb.onclick = () => applyEdits("share");
   const rb = $("#resetBtn"); if (rb) rb.onclick = drawSlot;
-  drawChars();
+  showSub();
+}
+
+// ---- subtab switch ---------------------------------------------------------
+function showSub() {
+  $$("[data-sub]").forEach((b) => b.classList.toggle("on", b.dataset.sub === SUB));
+  const hint = $("#subhint");
+  if (SUB === "recruit") {
+    if (hint) hint.innerHTML = `Set each character's recruitment status in one place — the exact per-character flag the game checks. ` +
+      `<b>Recruiting a character the story hasn't unlocked yet can soft-lock an early save</b> — keep a backup. Changes are staged until you Apply.`;
+    drawRecruit();
+  } else {
+    if (hint) hint.innerHTML = `Stats, level/EXP, weapon Lv, runes, unite attacks and equipment per character. ` +
+      `Tap a card to expand. <label style="cursor:pointer;margin-left:6px"><input type="checkbox" id="reconly" ${RECRUITED_ONLY ? "checked" : ""}> recruited only</label>`;
+    drawChars();
+    const rc = $("#reconly"); if (rc) rc.onchange = (e) => { RECRUITED_ONLY = e.target.checked; drawChars(); };
+  }
 }
 
 // ---- Characters ------------------------------------------------------------
 function charByRoster(ri) { return saves[curSlot].characters.find((c) => c.rosterIndex === ri); }
+// staged recruitment value for a character (falls back to the loaded value)
+function recOf(c) { const e = CE[c.rosterIndex]; return (e && "recruited" in e) ? e.recruited : c.recruited; }
 
 function drawChars() {
   const s = saves[curSlot];
   let pool = s.characters || [];
-  if (RECRUITED_ONLY) pool = pool.filter((c) => (c.recruited || 0) >= 10);
+  if (RECRUITED_ONLY) pool = pool.filter((c) => (recOf(c) || 0) >= 10);
   const shown = pool.filter((c) => !SEARCH || c.name.toLowerCase().includes(SEARCH) || String(c.rosterIndex) === SEARCH);
-  const box = $("#charbox");
+  const box = $("#subview");
   box.innerHTML = shown.map(charCard).join("") || `<div class="muted" style="padding:6px 2px">no matching characters</div>`;
   shown.forEach(wireChar);
 }
 
+// ---- Recruit (bulk, per-row) -----------------------------------------------
+function drawRecruit() {
+  const s = saves[curSlot];
+  const shown = (s.characters || []).filter((c) => !SEARCH || c.name.toLowerCase().includes(SEARCH) || String(c.rosterIndex) === SEARCH);
+  const rows = shown.map((c) => {
+    const cur = recOf(c);
+    const staged = CE[c.rosterIndex] && "recruited" in CE[c.rosterIndex] && CE[c.rosterIndex].recruited !== c.recruited;
+    const unrec = (cur || 0) === 0;
+    const opts = REC_STATES.map(([v, l]) => `<option value="${v}"${v === cur ? " selected" : ""}>${l}</option>`).join("") +
+      (REC_STATES.some(([v]) => v === cur) ? "" : `<option value="${cur}" selected>? (${cur})</option>`);
+    return `<tr class="${staged ? "dirtyrow" : ""}${unrec ? " unrec" : ""}">
+        <td>${esc(c.name)}</td><td class="sl">#${c.rosterIndex}</td>
+        <td><select data-recrow="${c.rosterIndex}" style="max-width:210px">${opts}</select></td></tr>`;
+  }).join("") || `<tr><td colspan="3" class="muted">no matching characters</td></tr>`;
+  $("#subview").innerHTML =
+    `<div class="warnbox">Story-gated characters can soft-lock an early save if forced in — recruit optional units, and keep a backup.</div>
+     <table class="invtbl"><thead><tr><th>Character</th><th>#</th><th>Recruitment</th></tr></thead><tbody>${rows}</tbody></table>`;
+  $$("select[data-recrow]").forEach((se) => (se.onchange = () => {
+    const c = charByRoster(+se.dataset.recrow); if (!c) return;
+    ce(c.rosterIndex).recruited = +se.value;
+    const tr = se.closest("tr");
+    if (tr) { tr.classList.toggle("dirtyrow", +se.value !== c.recruited); tr.classList.toggle("unrec", +se.value === 0); }
+    refreshDirty();
+  }));
+}
+
 function charCard(c) {
   const ri = c.rosterIndex;
-  const unrec = (c.recruited || 0) === 0;
+  const rcur = recOf(c);
+  const unrec = (rcur || 0) === 0;
   const num = (k, val, max) =>
     `<input type="number" min="0" max="${max}" value="${val}" data-ri="${ri}" data-k="${k}" data-def="${val}" title="0–${max}">`;
   const stat = (n) =>
@@ -430,8 +480,8 @@ function charCard(c) {
           <input type="number" min="0" max="3" value="${(c.unites || [])[+slot] || 0}" data-uri="${ri}" data-uslot="${slot}" data-def="${(c.unites || [])[+slot] || 0}"></label>`).join("")}</div>`
     : "";
 
-  const recOpts = REC_STATES.map(([v, l]) => `<option value="${v}"${v === c.recruited ? " selected" : ""}>${l}</option>`).join("") +
-    (REC_STATES.some(([v]) => v === c.recruited) ? "" : `<option value="${c.recruited}" selected>? (${c.recruited})</option>`);
+  const recOpts = REC_STATES.map(([v, l]) => `<option value="${v}"${v === rcur ? " selected" : ""}>${l}</option>`).join("") +
+    (REC_STATES.some(([v]) => v === rcur) ? "" : `<option value="${rcur}" selected>? (${rcur})</option>`);
 
   // B13 reference enrichment: elemental rune affinity (which runes suit this unit)
   const aff = affFor(c.name);
@@ -442,7 +492,7 @@ function charCard(c) {
   return `<details class="char${unrec ? " unrec" : ""}"><summary>
       <span class="chev">▸</span><span class="nm">${esc(c.name)}</span>
       <span class="muted">#${ri}</span>
-      <span class="pill${(c.recruited || 0) >= 10 ? " on" : ""}">${esc(c.recruitedName || "")}</span>
+      <span class="pill${(rcur || 0) >= 10 ? " on" : ""}">${esc(recName(rcur))}</span>
       <span class="lv">Lv ${lv} · HP ${c.maxHP}</span></summary>
     <div class="char-body" data-roster="${ri}">
       <div class="row" style="gap:8px;margin:6px 0 2px"><span class="muted">Recruitment</span>
