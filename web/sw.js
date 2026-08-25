@@ -6,7 +6,7 @@
 //     back to cache when offline. Keeps a new deploy fresh yet still works with no signal.
 //   - cross-origin (the Pyodide CDN — large, immutable, version-pinned URLs): cache-first,
 //     so the ~10 MB runtime downloads once and is instant thereafter.
-const CACHE = "s4editor-v5";
+const CACHE = "s4editor-v6";
 const SHARE_CACHE = "s4editor-share";   // must match app.js (share-target hand-off)
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./iso.js", "./manifest.webmanifest",

@@ -82,6 +82,19 @@ patch=1,EE,202D5C3C,extended,24040019
 is the replacement instruction word. Fully off is better done with the existing community
 "No Random Battles" code (it forces the gate at `0x2D5C84`), or use the near-off row above.
 
+## Related boolean patches (exposed as checkboxes in the web ISO editor)
+
+Two on/off code patches in the same routine, both 4-byte writes:
+
+| Toggle | ISO offset | vaddr | stock → on | meaning |
+|---|---|---|---|---|
+| **Turn off random battles completely** | `0x10E484` | `0x2D5C84` | `5C 57 0B 0C` → `00 00 02 24` | replaces `jal 0x2D5D70` (the encounter gate) with `li v0,0`, forcing "no encounter" — the community "No Random Battles" code. |
+| **Champion's Rune effect — always on** | `0x10E610` | `0x2D5E10` | `09 00 80 12` → `00 00 00 00` | NOPs `beqz s4, 0x2D5E38` (the "does anyone have the Champion's Rune?" gate), so the routine's *selective* suppression (skip enemies weaker than the party average vs threshold `s7`) runs for the whole party without the rune equipped. Softer than a full off. |
+
+The gate at `0x2D5D70` is the Champion's Rune implementation: it loops each party member's
+3 rune slots (`xori v0, 0x1C`; `0x1C` = Champion's Rune) to set `s4`, then — if `s4` — compares
+the party average to threshold `s7` and returns 0 (suppress) when strong enough.
+
 ### In-game alternative (no cheats, save-editable)
 
 The game already ships an encounter-*reducer*: the **Champion's Rune** (`0x1C`) or the

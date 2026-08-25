@@ -23,8 +23,9 @@
       key: "encounterRate", group: "Random encounters", type: "percent",
       label: "Encounter rate", off: 0x10E43C, len: 4, def: 100, min: 1, max: 1000,
       unit: "% of normal",
-      hint: "100 = normal · 50 = half · 200 = double. The game draws the encounter threshold as " +
-            "rand(0..N-1); this sets N = round(10000 / percent).",
+      presets: [["Normal", 100], ["½", 50], ["¼", 25], ["Rare", 10], ["2×", 200]],
+      hint: "How often random battles happen, as a percent of the stock rate. The game rolls the " +
+            "encounter threshold as rand(0..N-1); this sets N = round(10000 / percent). Lower = fewer.",
       sig: (b) => b[2] === 0x04 && b[3] === 0x24,     // addiu a0, zero, imm
       read: (dv) => { const N = dv.getUint16(0, true); return N ? Math.round(10000 / N) : 100; },
       write: (dv, pct) => {
@@ -33,9 +34,26 @@
       },
     },
     {
+      key: "championAlways", group: "Random encounters", type: "bool",
+      label: "Champion's Rune effect — always on",
+      sub: "Skip battles against enemies weaker than your party, for the whole party, without " +
+           "equipping the rune. Strong parties get near-total peace; weaker parties still fight. " +
+           "This is the game's own Champion's Rune behaviour — softer than turning battles off.",
+      off: 0x10E610, len: 4,
+      onBytes: [0x00, 0x00, 0x00, 0x00],             // nop the "does anyone have the Champion's Rune?" branch
+      offBytes: [0x09, 0x00, 0x80, 0x12],            // beqz s4, 0x2D5E38 (stock)
+      sig: (b) => (b[0] === 0x09 && b[1] === 0x00 && b[2] === 0x80 && b[3] === 0x12) ||
+                  (b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x00 && b[3] === 0x00),
+      read: (dv) => dv.getUint32(0, true) === 0 ? 1 : 0,
+      write: (dv, on) => { (on ? [0, 0, 0, 0] : [0x09, 0x00, 0x80, 0x12]).forEach((v, i) => dv.setUint8(i, v)); },
+    },
+    {
       key: "noBattles", group: "Random encounters", type: "bool",
-      label: "Disable ALL random battles",
-      sub: "Forces the Champion's Rune effect on globally — no random encounters anywhere.",
+      label: "Turn off random battles completely",
+      sub: "No random encounters anywhere — stronger than the Champion's Rune, which only stops " +
+           "battles with weaker enemies. For fewer (not zero) battles, lower the rate instead; for " +
+           "the Champion's Rune's selective effect, equip it in the Save Editor. Scripted story " +
+           "fights still happen.",
       off: 0x10E484, len: 4,
       onBytes: [0x00, 0x00, 0x02, 0x24],              // li v0, 0  (force gate = no encounter)
       offBytes: [0x5C, 0x57, 0x0B, 0x0C],             // jal 0x2D5D70 (stock)
@@ -184,10 +202,13 @@
       : mode === "stream" ? "saving streams a patched copy to your downloads"
       : "this browser can't write the ISO — copy the pnach line instead";
 
-    const groupHtml = Object.entries(groups).map(([g, fs]) => `
-      <div class="card"><h3 class="sec">${esc(g)}</h3>
-        <div class="grid">${fs.map(fieldHtml).join("")}</div>
-      </div>`).join("");
+    const groupHtml = Object.entries(groups).map(([g, fs]) => {
+      const vals = fs.filter((f) => f.type !== "bool"), bools = fs.filter((f) => f.type === "bool");
+      return `<div class="card"><h3 class="sec">${esc(g)}</h3>
+        ${vals.length ? `<div class="grid">${vals.map(fieldHtml).join("")}</div>` : ""}
+        ${bools.length ? `<div class="isotoggles">${bools.map(fieldHtml).join("")}</div>` : ""}
+      </div>`;
+    }).join("");
 
     $("#isoEditor").innerHTML = groupHtml + `
       <div class="card">
@@ -205,6 +226,7 @@
       </div>`;
 
     FIELDS.forEach(wireField);
+    syncEnable();
     const sv = $("#isoSave"); if (sv) sv.onclick = save;
     const rs = $("#isoReset"); if (rs) rs.onclick = () => { for (const k in WINDOWS) WINDOWS[k].buf.set(WINDOWS[k].orig); render(); };
     $("#isoPnach").onclick = copyPnach;
@@ -213,23 +235,48 @@
   function fieldHtml(f) {
     const w = win(f.key); const cur = f.read(w.dv);
     if (f.type === "bool") {
-      return `<div class="field"><label class="row" style="gap:8px;cursor:pointer;min-height:40px">
-          <input type="checkbox" data-iso="${f.key}" ${cur ? "checked" : ""}> <b>${esc(f.label)}</b></label>
-        ${f.sub ? `<div class="fnote">${esc(f.sub)}</div>` : ""}</div>`;
+      return `<label class="isotoggle"><input type="checkbox" data-iso="${f.key}" ${cur ? "checked" : ""}>
+          <span class="isotxt"><b>${esc(f.label)}</b>${f.sub ? `<span class="isosub">${esc(f.sub)}</span>` : ""}</span></label>`;
     }
-    return `<div class="field"><span>${esc(f.label)} <span class="muted">(${esc(f.unit || "")})</span></span>
+    const presets = (f.presets || []).map(([lbl, v]) =>
+      `<button type="button" class="chip mini" data-preset="${f.key}" data-pv="${v}"${v === cur ? ' aria-pressed="true"' : ""}>${esc(lbl)}</button>`).join("");
+    return `<div class="field" data-fieldwrap="${f.key}"><span>${esc(f.label)} <span class="muted">(${esc(f.unit || "")})</span></span>
         <input type="number" min="${f.min || 0}" max="${f.max || 999999}" value="${cur}" data-iso="${f.key}" data-def="${cur}">
+        ${presets ? `<div class="presetrow">${presets}</div>` : ""}
         ${f.hint ? `<div class="fnote">${esc(f.hint)}</div>` : ""}</div>`;
   }
 
   function wireField(f) {
     const el = document.querySelector(`[data-iso="${f.key}"]`); if (!el) return;
     const w = win(f.key);
-    el.onchange = el.oninput = () => {
+    const commit = () => {
       if (f.type === "bool") f.write(w.dv, el.checked ? 1 : 0);
       else f.write(w.dv, +el.value || f.def);
-      if (el.classList) el.classList.toggle("dirty", isDirty(f.key));
+      el.classList && el.classList.toggle("dirty", isDirty(f.key));
+      syncEnable();
     };
+    el.onchange = el.oninput = commit;
+    document.querySelectorAll(`[data-preset="${f.key}"]`).forEach((b) => (b.onclick = () => {
+      el.value = b.dataset.pv; commit();
+      document.querySelectorAll(`[data-preset="${f.key}"]`).forEach((x) => x.removeAttribute("aria-pressed"));
+      b.setAttribute("aria-pressed", "true");
+    }));
+  }
+
+  // When "turn off random battles" is on, the rate and the Champion toggle are moot — grey them.
+  function syncEnable() {
+    const cb = document.querySelector('[data-iso="noBattles"]');
+    const off = !!(cb && cb.checked);
+    const wrap = document.querySelector('[data-fieldwrap="encounterRate"]');
+    if (wrap) {
+      wrap.classList.toggle("disabled", off);
+      wrap.querySelectorAll("input,button").forEach((el) => (el.disabled = off));
+      let note = wrap.querySelector(".isonote");
+      if (off && !note) { note = document.createElement("div"); note.className = "fnote isonote"; note.textContent = "Ignored — all random battles are off."; wrap.appendChild(note); }
+      else if (!off && note) note.remove();
+    }
+    const champ = document.querySelector('[data-iso="championAlways"]');
+    if (champ) { const row = champ.closest(".isotoggle"); if (row) row.classList.toggle("disabled", off); champ.disabled = off; }
   }
 
   // ---- review + save ----------------------------------------------------------
