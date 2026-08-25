@@ -1,8 +1,11 @@
 # Suikoden IV Save Editor
 
 > **▶ [Open the web editor](https://thesparda.github.io/Suikoden-4-Save-Editor/web/)** —
-> edit your saves right in the browser (or install it on Android). Nothing to download,
-> nothing uploaded. See [`web/`](web/) for details.
+> edit your saves *and your disc* right in the browser (or install it on Android). Nothing
+> to download, nothing uploaded. Full save parity plus searchable pickers, rune-affinity
+> hints, a bulk Recruit tab, save-in-place/share, and an **ISO Editor** (encounter-rate
+> slider + battle toggles) that writes in place on desktop or streams a patched copy on
+> Android. See [`web/`](web/) for the full rundown.
 
 A cross-platform **save editor** for **Suikoden IV** (PlayStation 2). Edit recruitment,
 levels, stats, runes, equipment, unite attacks, money, and more — directly in your PS2
@@ -133,15 +136,40 @@ trailing checksum was reverse-engineered and verified; MAX Drive is LZARI-decomp
 
 Full notes: [`Editor/Suikoden4_offsets.md`](Editor/Suikoden4_offsets.md).
 
+## ISO editing — random encounters
+
+The boot ELF's random-encounter logic was reverse-engineered, so the **encounter rate** and
+a couple of battle toggles are editable (this is code in `SLUS_209.79`, not save data):
+
+- **Encounter rate** — the game rolls the threshold as `rand(0..99)`; scaling that range
+  scales the rate (`N = round(10000 / percent)`, so 50% ≈ half as many battles).
+- **Champion's Rune effect — always on** — forces the game's own selective suppression
+  (skip enemies weaker than the party) party-wide without equipping the rune.
+- **Turn off random battles completely** — replaces the encounter-gate call with a no-op.
+
+Two ways to apply, both **NTSC-U only** and fully reversible:
+
+- **Web ISO Editor** (a slider + toggles) — writes in place on desktop Chromium, or streams
+  a patched copy on Android. See [`web/`](web/).
+- **CLI:** [`Editor/s4_encounter_rate.py`](Editor/s4_encounter_rate.py) sets the rate as a
+  percentage with an in-place 4-byte edit:
+  ```bash
+  python3 Editor/s4_encounter_rate.py 50    # half as many encounters
+  python3 Editor/s4_encounter_rate.py 100   # restore default
+  ```
+
+Full notes: [`Editor/Suikoden4_encounter_rate.md`](Editor/Suikoden4_encounter_rate.md).
+
 ## Not included (and why)
 
 - **Inventory / item bag** — the save holds two parallel equipment-shaped blocks per
   character and no clean (item, qty) array; pinning which is which safely needs a
   controlled before/after save. Held back rather than guessed.
-- **New-game / ISO editing and rune-spell tables** — S4 keeps its parameter tables inside
-  `FILEDATA`'s ~1,000 unlabeled sub-archives, consumed by overlay code, with no strings
-  and no static tables in the boot ELF (join stats are *computed* from growth curves, not
-  stored). A PCSX2 savestate would unlock this; until then the ISO tab stays read-only.
+- **New-game character stat tables** — S4 keeps these inside `FILEDATA`'s ~1,000 unlabeled
+  sub-archives, consumed by overlay code, with no strings and no static tables in the boot
+  ELF (join stats are *computed* from growth curves, not stored). A PCSX2 savestate would
+  unlock this; until then they aren't editable, and the **desktop** ISO tab stays read-only.
+  (Boot-ELF code parameters *are* editable — see ISO editing below.)
 - **`.psv` / `.max` writing** — Sony signature / LZARI re-encoder respectively.
 
 ---
@@ -154,12 +182,15 @@ Editor/
   s4files.py             single-file containers (.cbs/.psu/.sps/.psv/.max)
   s4lzari.py             LZARI decoder (ported from mymc) for MAX Drive saves
   s4patch.py             ISO identity, file map, hex/byte-search tools
+  s4_encounter_rate.py   CLI: set the random-encounter rate by % (in-place ISO edit)
   s4_char_offsets.json   113 characters (record offset -> name)
   s4_item_names.json     519 item ids -> names
   s4_rune_names.json     42 rune ids -> names
   s4_unites.json         per-character unite-attack slot names + partners
   s4_affinities.json     per-character rune affinities
-  Suikoden4_offsets.md   reverse-engineering documentation
+  Suikoden4_offsets.md   reverse-engineering documentation (save layout + checksum)
+  Suikoden4_encounter_rate.md  reverse-engineering notes for the encounter-rate patches
+web/                     browser build (save + ISO editors, PWA) — see web/README.md
 Base ISO/                your Suikoden IV disc image (USA or PAL) — not included
 ```
 
