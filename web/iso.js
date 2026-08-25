@@ -23,7 +23,8 @@
       key: "encounterRate", group: "Random encounters", type: "percent",
       label: "Encounter rate", off: 0x10E43C, len: 4, def: 100, min: 1, max: 1000,
       unit: "% of normal",
-      presets: [["Normal", 100], ["½", 50], ["¼", 25], ["Rare", 10], ["2×", 200]],
+      presets: [["¼", 25], ["Half", 50], ["Stock", 100], ["Double", 200], ["Triple", 300]],
+      slider: [5, 300, 5],
       hint: "How often random battles happen, as a percent of the stock rate. The game rolls the " +
             "encounter threshold as rand(0..N-1); this sets N = round(10000 / percent). Lower = fewer.",
       sig: (b) => b[2] === 0x04 && b[3] === 0x24,     // addiu a0, zero, imm
@@ -240,12 +241,16 @@
     }
     const presets = (f.presets || []).map(([lbl, v]) =>
       `<button type="button" class="chip mini" data-preset="${f.key}" data-pv="${v}"${v === cur ? ' aria-pressed="true"' : ""}>${esc(lbl)}</button>`).join("");
+    const sl = f.slider;
+    const sliderHtml = sl
+      ? `<input type="range" class="rateslider" data-rateslider="${f.key}" min="${sl[0]}" max="${sl[1]}" step="${sl[2] || 1}" value="${Math.min(sl[1], Math.max(sl[0], cur))}" aria-label="${esc(f.label)}">` : "";
     return `<div class="field ratefield" data-fieldwrap="${f.key}"><span>${esc(f.label)} <span class="muted">(${esc(f.unit || "")})</span></span>
+        ${presets ? `<div class="presetrow">${presets}</div>` : ""}
         <div class="raterow">
+          ${sliderHtml}
           <input type="number" min="${f.min || 0}" max="${f.max || 999999}" value="${cur}" data-iso="${f.key}" data-def="${cur}" class="rateinput">
           <span class="ratetag" data-ratetag="${f.key}">${esc(rateTag(cur))}</span>
         </div>
-        ${presets ? `<div class="presetrow">${presets}</div>` : ""}
         ${f.hint ? `<div class="fnote ratefnote">${esc(f.hint)}</div>` : ""}</div>`;
   }
   // friendly readout of a percent, e.g. 50 -> "≈ ½× the battles", 200 -> "≈ 2× the battles"
@@ -260,20 +265,25 @@
   function wireField(f) {
     const el = document.querySelector(`[data-iso="${f.key}"]`); if (!el) return;
     const w = win(f.key);
+    const sliders = () => document.querySelectorAll(`[data-rateslider="${f.key}"]`);
+    // light up the preset chip that matches the current value (if any)
+    const highlight = () => document.querySelectorAll(`[data-preset="${f.key}"]`).forEach((b) => {
+      if (+b.dataset.pv === (+el.value || 0)) b.setAttribute("aria-pressed", "true"); else b.removeAttribute("aria-pressed");
+    });
+    // slider, number box, and presets all funnel through this one commit
     const commit = () => {
       if (f.type === "bool") f.write(w.dv, el.checked ? 1 : 0);
       else f.write(w.dv, +el.value || f.def);
       el.classList && el.classList.toggle("dirty", isDirty(f.key));
       const tag = document.querySelector(`[data-ratetag="${f.key}"]`);
       if (tag) tag.textContent = rateTag(el.value);
+      sliders().forEach((sl) => { const v = Math.min(+sl.max, Math.max(+sl.min, +el.value || 0)); if (+sl.value !== v) sl.value = v; });
+      if (f.type !== "bool") highlight();
       syncEnable();
     };
     el.onchange = el.oninput = commit;
-    document.querySelectorAll(`[data-preset="${f.key}"]`).forEach((b) => (b.onclick = () => {
-      el.value = b.dataset.pv; commit();
-      document.querySelectorAll(`[data-preset="${f.key}"]`).forEach((x) => x.removeAttribute("aria-pressed"));
-      b.setAttribute("aria-pressed", "true");
-    }));
+    sliders().forEach((sl) => (sl.oninput = () => { el.value = sl.value; commit(); }));
+    document.querySelectorAll(`[data-preset="${f.key}"]`).forEach((b) => (b.onclick = () => { el.value = b.dataset.pv; commit(); }));
   }
 
   // When "turn off random battles" is on, the rate and the Champion toggle are moot — grey them.

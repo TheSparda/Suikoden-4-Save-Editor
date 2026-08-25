@@ -18,7 +18,7 @@ const GEAR_LABELS = { head: "Head", body: "Body", hands: "Hands", feet: "Feet",
                       acc1: "Accessory 1", acc2: "Accessory 2", acc3: "Accessory 3" };
 const CHAR_CAP = { maxHP: 9999, exp: 98999, weaponLvl: 15 };
 const POTCH_MAX = 99999999;
-const APP_VERSION = "1.6.3";        // keep in lockstep with the footer in index.html
+const APP_VERSION = "1.6.4";        // keep in lockstep with the footer in index.html
 // Elemental rune affinity reference (s4_affinities.json) — teaches which runes suit a unit.
 const AFF_ELEMS = ["Fire", "Lightning", "Water", "Wind", "Earth"];
 const AFF_RATE = { 1: "poor", 2: "average", 3: "good", 4: "excellent" };

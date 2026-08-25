@@ -116,8 +116,9 @@ details[open] .chev { transform:rotate(90deg); }
 
 /* ISO editor: value fields, quick-set presets, full-width toggle rows */
 .isovals { display:flex; flex-direction:column; gap:4px; }
-.ratefield .raterow { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:2px; }
-.ratefield .rateinput { width:120px; max-width:120px; text-align:left; }
+.ratefield .raterow { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:8px; }
+.ratefield .rateslider { flex:1 1 200px; min-width:160px; accent-color:var(--acc); height:22px; cursor:pointer; }
+.ratefield .rateinput { width:84px; max-width:84px; text-align:center; flex:none; }
 .ratefield .ratetag { color:var(--acc2); font-size:13px; font-weight:600; }
 .ratefield .ratefnote { max-width:64ch; margin-top:8px; }
 .presetrow { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
