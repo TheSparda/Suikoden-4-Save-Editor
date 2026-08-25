@@ -6,12 +6,26 @@
 //     back to cache when offline. Keeps a new deploy fresh yet still works with no signal.
 //   - cross-origin (the Pyodide CDN — large, immutable, version-pinned URLs): cache-first,
 //     so the ~10 MB runtime downloads once and is instant thereafter.
-const CACHE = "s4editor-v4";
+const CACHE = "s4editor-v5";
 const SHARE_CACHE = "s4editor-share";   // must match app.js (share-target hand-off)
 const SHELL = [
-  "./", "./index.html", "./style.css", "./app.js", "./manifest.webmanifest",
+  "./", "./index.html", "./style.css", "./app.js", "./iso.js", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png",
 ];
+
+// ---- streaming download (the ISO editor's Android/Firefox "save patched ISO") -------------
+// A patched ~4 GB ISO can't be held in memory, and Android has no showSaveFilePicker. The page
+// builds a ReadableStream (the source disc with the edited byte-runs spliced in) and transfers
+// it here; we serve it as a file download from a same-origin URL, streamed straight to the
+// device with backpressure. Fully local — nothing is uploaded, no third-party helper.
+const DL = new Map();   // id -> { stream, filename, size }
+self.addEventListener("message", (e) => {
+  const d = e.data || {};
+  if (d.type === "dl-register" && d.id && d.stream) {
+    DL.set(d.id, { stream: d.stream, filename: d.filename || "patched.iso", size: d.size || 0 });
+    if (e.ports && e.ports[0]) e.ports[0].postMessage("ok");   // ack so the page can start the download
+  }
+});
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -26,6 +40,22 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const req = e.request;
+  // Streaming download hand-off: serve a previously-registered patched-ISO stream as a file.
+  const dlUrl = new URL(req.url);
+  if (req.method === "GET" && dlUrl.pathname.includes("/_dl/")) {
+    const id = dlUrl.pathname.split("/_dl/")[1];
+    const entry = DL.get(id);
+    if (entry) {
+      DL.delete(id);
+      const headers = { "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${String(entry.filename).replace(/"/g, "")}"` };
+      if (entry.size) headers["Content-Length"] = String(entry.size);
+      e.respondWith(new Response(entry.stream, { headers }));
+      return;
+    }
+    e.respondWith(new Response("gone", { status: 404 }));
+    return;
+  }
   // Web Share Target: a save shared into the installed PWA arrives as a POST. Stash the file,
   // then redirect to the app which picks it up (?shared=1). See app.js pickupSharedFile.
   if (req.method === "POST" && new URL(req.url).pathname.endsWith("/share-target")) {

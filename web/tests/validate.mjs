@@ -18,7 +18,7 @@ const bad = (m) => { console.log("  ✗ " + m); failures++; };
 
 // 1) JS syntax
 console.log("JS syntax:");
-for (const f of ["app.js", "sw.js"]) {
+for (const f of ["app.js", "iso.js", "sw.js"]) {
   try { execFileSync(process.execPath, ["--check", path.join(WEB, f)]); ok(f); }
   catch (e) { bad(`${f} — ${String(e.stderr || e).split("\n")[0]}`); }
 }
@@ -99,6 +99,23 @@ console.log("Depth features (B17/B18):");
 (/function forceRefresh/.test(app) && /caches\.delete/.test(app) && /unregister/.test(app) ? ok : bad)("force-refresh clears SW + caches");
 (/checkVersionBehind/.test(app) && /cache:\s*"no-store"/.test(app) ? ok : bad)("version-behind check (cache-busted, no-store)");
 (/id="forceRefresh"/.test(html) && /id="updateBanner"/.test(html) ? ok : bad)("index.html has the force-refresh button + update banner");
+
+// 7b) ISO editor: field offsets sit inside the boot ELF, streaming save is wired end-to-end
+console.log("ISO editor:");
+const iso = fs.readFileSync(path.join(WEB, "iso.js"), "utf8");
+const ELF_ISO_START = 367 * 2048;                 // boot ELF LBA 367
+const ELF_ISO_END = ELF_ISO_START + 3214528;      // + ELF size
+const isoOffs = [...iso.matchAll(/off:\s*(0x[0-9A-Fa-f]+)/g)].map((m) => parseInt(m[1], 16));
+(isoOffs.length >= 2 ? ok : bad)(`ISO field offsets found: ${isoOffs.length}`);
+(isoOffs.every((o) => o >= ELF_ISO_START && o < ELF_ISO_END) ? ok : bad)(`all ISO offsets inside the boot ELF [0x${ELF_ISO_START.toString(16)}..0x${ELF_ISO_END.toString(16)})`);
+(isoOffs.includes(0x10E43C) ? ok : bad)("encounter-rate offset 0x10E43C present");
+(/showOpenFilePicker/.test(iso) && /createWritable/.test(iso) && /keepExistingData/.test(iso) ? ok : bad)("in-place save (File System Access) wired");
+(/ReadableStream/.test(iso) && /dl-register/.test(iso) && /_dl\//.test(iso) ? ok : bad)("streaming save (service-worker hand-off) wired");
+(/dl-register/.test(sw) && /_dl\//.test(sw) && /new Response\(entry\.stream/.test(sw) ? ok : bad)("service worker serves the streamed download");
+(/data-mode="iso"/.test(html) ? ok : bad)("index.html has the ISO Editor tab");
+(/src=["']iso\.js["']/.test(html) ? ok : bad)("index.html loads iso.js");
+(/iso\.js/.test(sw) ? ok : bad)("service worker precaches iso.js");
+(/window\.ISO/.test(app) && /window\.ISO\.init/.test(app) ? ok : bad)("app.js hands off to the ISO editor on the iso tab");
 
 // 8) version lockstep: app.js APP_VERSION === index.html footer version (B12 corollary)
 console.log("Version lockstep:");

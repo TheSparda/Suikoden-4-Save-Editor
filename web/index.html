@@ -24,6 +24,7 @@
 
   <nav class="modebar">
     <button class="mtab on" data-mode="save">Save Editor</button>
+    <button class="mtab" data-mode="iso">ISO Editor</button>
     <button class="mtab" data-mode="ref">Reference</button>
   </nav>
 
@@ -51,6 +52,14 @@
     <div id="editor"></div>
   </section>
 
+  <section id="mode-iso" class="mode hidden">
+    <p class="sub">Edit the game disc directly — encounter rate and other code tweaks — written
+      <b>in place</b> on desktop Chrome/Edge/Brave/Opera, or <b>streamed as a patched copy</b> to
+      your downloads on Android Chrome/Firefox. Nothing is uploaded; only tiny byte-runs change.
+      NTSC-U (SLUS-209.79) only. Back up first.</p>
+    <div id="isoRoot"></div>
+  </section>
+
   <section id="mode-ref" class="mode hidden">
     <p class="sub">Browse the verified reference tables — all 113 characters, 519 items, and 42
       runes with their in-game ids.</p>
@@ -63,13 +72,15 @@
     <button class="tb" id="forceRefresh" title="unregister the service worker, clear caches, and reload — fixes a stale app">↻ Force refresh</button>
     <span class="credit">Made by <b>Sparda</b> ·
       <a href="https://github.com/TheSparda/Suikoden-4-Save-Editor" target="_blank" rel="noopener noreferrer">GitHub</a>
-      · v1.5.0</span>
-    <span class="note">Client-side Pyodide port of <code>s4save.py</code> — full parity with the
-      desktop save editor, nothing uploaded, works everywhere including Android.</span>
+      · v1.6.0</span>
+    <span class="note">Save editor: client-side Pyodide port of <code>s4save.py</code> (full parity,
+      works everywhere including Android). ISO editor: in-place on desktop Chromium, streams a
+      patched copy on Android. Nothing uploaded.</span>
   </footer>
 </div>
 
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
 <script src="app.js"></script>
+<script src="iso.js"></script>
 </body>
 </html>
