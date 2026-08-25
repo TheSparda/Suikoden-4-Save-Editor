@@ -205,7 +205,7 @@
     const groupHtml = Object.entries(groups).map(([g, fs]) => {
       const vals = fs.filter((f) => f.type !== "bool"), bools = fs.filter((f) => f.type === "bool");
       return `<div class="card"><h3 class="sec">${esc(g)}</h3>
-        ${vals.length ? `<div class="grid">${vals.map(fieldHtml).join("")}</div>` : ""}
+        ${vals.length ? `<div class="isovals">${vals.map(fieldHtml).join("")}</div>` : ""}
         ${bools.length ? `<div class="isotoggles">${bools.map(fieldHtml).join("")}</div>` : ""}
       </div>`;
     }).join("");
@@ -240,10 +240,21 @@
     }
     const presets = (f.presets || []).map(([lbl, v]) =>
       `<button type="button" class="chip mini" data-preset="${f.key}" data-pv="${v}"${v === cur ? ' aria-pressed="true"' : ""}>${esc(lbl)}</button>`).join("");
-    return `<div class="field" data-fieldwrap="${f.key}"><span>${esc(f.label)} <span class="muted">(${esc(f.unit || "")})</span></span>
-        <input type="number" min="${f.min || 0}" max="${f.max || 999999}" value="${cur}" data-iso="${f.key}" data-def="${cur}">
+    return `<div class="field ratefield" data-fieldwrap="${f.key}"><span>${esc(f.label)} <span class="muted">(${esc(f.unit || "")})</span></span>
+        <div class="raterow">
+          <input type="number" min="${f.min || 0}" max="${f.max || 999999}" value="${cur}" data-iso="${f.key}" data-def="${cur}" class="rateinput">
+          <span class="ratetag" data-ratetag="${f.key}">${esc(rateTag(cur))}</span>
+        </div>
         ${presets ? `<div class="presetrow">${presets}</div>` : ""}
-        ${f.hint ? `<div class="fnote">${esc(f.hint)}</div>` : ""}</div>`;
+        ${f.hint ? `<div class="fnote ratefnote">${esc(f.hint)}</div>` : ""}</div>`;
+  }
+  // friendly readout of a percent, e.g. 50 -> "≈ ½× the battles", 200 -> "≈ 2× the battles"
+  function rateTag(p) {
+    p = +p || 0; if (!p) return "";
+    if (p === 100) return "= the game's normal rate";
+    const FR = { 50: "½", 25: "¼", 20: "⅕", 10: "1/10" };
+    const s = p < 100 ? (FR[p] || "1/" + Math.round(100 / p)) : (Number.isInteger(p / 100) ? p / 100 : (p / 100).toFixed(1)) + "×";
+    return `≈ ${s} the battles`;
   }
 
   function wireField(f) {
@@ -253,6 +264,8 @@
       if (f.type === "bool") f.write(w.dv, el.checked ? 1 : 0);
       else f.write(w.dv, +el.value || f.def);
       el.classList && el.classList.toggle("dirty", isDirty(f.key));
+      const tag = document.querySelector(`[data-ratetag="${f.key}"]`);
+      if (tag) tag.textContent = rateTag(el.value);
       syncEnable();
     };
     el.onchange = el.oninput = commit;

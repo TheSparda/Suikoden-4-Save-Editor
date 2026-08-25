@@ -114,8 +114,13 @@ details[open] .chev { transform:rotate(90deg); }
 .aff.a4 { color:var(--acc2); border-color:var(--acc2); font-weight:600; }
 .presets { align-items:center; }
 
-/* ISO editor: quick-set preset chips + full-width toggle rows */
-.presetrow { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+/* ISO editor: value fields, quick-set presets, full-width toggle rows */
+.isovals { display:flex; flex-direction:column; gap:4px; }
+.ratefield .raterow { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:2px; }
+.ratefield .rateinput { width:120px; max-width:120px; text-align:left; }
+.ratefield .ratetag { color:var(--acc2); font-size:13px; font-weight:600; }
+.ratefield .ratefnote { max-width:64ch; margin-top:8px; }
+.presetrow { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
 .presetrow .chip[aria-pressed=true] { background:var(--acc); border-color:var(--acc); color:var(--accink); font-weight:600; }
 .field.disabled { opacity:.55; }
 .isotoggles { display:flex; flex-direction:column; gap:10px; margin-top:14px; }
