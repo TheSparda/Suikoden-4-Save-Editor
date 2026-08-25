@@ -6,7 +6,7 @@
 //     back to cache when offline. Keeps a new deploy fresh yet still works with no signal.
 //   - cross-origin (the Pyodide CDN — large, immutable, version-pinned URLs): cache-first,
 //     so the ~10 MB runtime downloads once and is instant thereafter.
-const CACHE = "s4editor-v6";
+const CACHE = "s4editor-v7";
 const SHARE_CACHE = "s4editor-share";   // must match app.js (share-target hand-off)
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./iso.js", "./manifest.webmanifest",
@@ -79,7 +79,10 @@ self.addEventListener("fetch", (e) => {
     const cache = await caches.open(CACHE);
     if (sameOrigin) {
       try {
-        const res = await fetch(req);
+        // no-store: bypass the browser HTTP cache so every online launch pulls the freshest
+        // shell together (GitHub Pages sets max-age; without this, app.js and index.html can
+        // refresh at different times and the running version desyncs from the footer).
+        const res = await fetch(req, { cache: "no-store" });
         if (res && res.status === 200) cache.put(req, res.clone());
         return res;
       } catch (err) {
