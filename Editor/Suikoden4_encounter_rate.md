@@ -89,9 +89,25 @@ The game already ships an encounter-*reducer*: the **Champion's Rune** (`0x1C`) 
 suppresses encounters once the party is strong enough — that is exactly what the gate at
 `0x2D5D70` implements.
 
-## Not a save edit
+## ISO edit (percentage knob)
 
-Encounter rate is game code, not save data, so it can't live in the save editor. It ships
-as a pnach / ISO ELF patch. The equivalent ISO ELF edit is: file offset `0x56C3C`
-(vaddr `0x2D5C3C` in `SLUS_209.79;1`, segment base vaddr `0x280000` / file `0x1000`),
-write the little-endian instruction word for your chosen `N`.
+Encounter rate is game code, not save data, so it can't live in the save editor — but it
+*can* be baked into the ISO with a 4-byte edit. The instruction sits at:
+
+- **ISO offset `0x10E43C`** (= LBA 367 × 2048 `0xB7800` + ELF offset `0x56C3C`),
+  vaddr `0x2D5C3C` in `SLUS_209.79;1`.
+
+The USA ISO is a plain 2048-byte/sector image, so there's **no ECC/EDC to rebuild** — just
+overwrite the 4 bytes with the little-endian word `0x24040000 | N`.
+
+Use the helper, which takes a **percentage of normal** (100 = unchanged, 50 = half,
+200 = double) and computes `N = round(10000 / percent)`:
+
+```bash
+python3 Editor/s4_encounter_rate.py --status     # show current rate
+python3 Editor/s4_encounter_rate.py 50           # set to 50% (half) — in place
+python3 Editor/s4_encounter_rate.py 100          # restore default
+```
+
+It verifies the `addiu a0,zero,imm` signature before writing (so it won't patch a PAL or
+mismatched build) and re-reads to confirm the write. Fully reversible via `... 100`.
