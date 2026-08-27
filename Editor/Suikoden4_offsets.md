@@ -235,6 +235,28 @@ reveal the ordering for all units. A speculative toggle is intentionally NOT shi
 note that flipping a recruit bit alone may not make a unit usable, since HQ/party
 availability and story gates are separate state.
 
+## New Game+ / clear-data flag — NOT yet located
+
+S4 has a New Game+: you beat the game, save the clear data, then start a new game from that
+file to carry over Potch and a subset of items (craftables transfer; the Champion's Rune and
+the Hero/Guardian/Pirate King equipment sets are excluded). A second-or-later playthrough
+also unlocks Triangle to skip cutscenes.
+
+Nothing in the save is currently known to hold "this playthrough has been cleared". The
+mapped regions (header, names, `0x108`/`0x164`/`0x1E4` per-character arrays, potch `0x3698`,
+world-map flags `0xA950`) leave most of the 57,952-byte body unclaimed, and no candidate has
+been identified. All 8 research saves are mid-playthrough, which is why it hasn't fallen out
+of existing data.
+
+**What would finish it:** a controlled pair — save right before the final boss, beat the
+game, save the clear data to a different slot — then diff, suppressing the mapped fields and
+the playtime mirrors (`+0x108/+0x2E8/+0x5B8/+0x720`). Failing that, a RAM search over EE
+`0x532860..+0xE260` with a clear file loaded (`save = ram - 0x532860`), or disassembly of the
+new-game menu / cutscene-skip read sites in `SLUS_209.79`. Open question the ELF route also
+answers: whether the carry-over set is a flag at all, or is computed when the clear-data save
+is written — if the latter, flipping a bit on a mid-game save may be accepted but carry
+nothing. Nothing speculative is shipped. Tracked in issue #1.
+
 ## Spell / unite tables — NOT yet located
 S3 kept spell/unite parameter tables in the ELF 2nd PT_LOAD, findable by an ascending
 damage curve. S4's ELF 2nd PT_LOAD (file 0x278480, vaddr 0x4F7480) was scanned the same

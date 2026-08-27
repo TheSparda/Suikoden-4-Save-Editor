@@ -170,6 +170,11 @@ Full notes: [`Editor/Suikoden4_encounter_rate.md`](Editor/Suikoden4_encounter_ra
   ELF (join stats are *computed* from growth curves, not stored). A PCSX2 savestate would
   unlock this; until then they aren't editable, and the **desktop** ISO tab stays read-only.
   (Boot-ELF code parameters *are* editable — see ISO editing below.)
+- **Forcing a save into New Game+ / clear-data state** — the byte that marks a playthrough
+  cleared hasn't been located; most of the 57,952-byte body is still unmapped and every
+  research save so far is mid-playthrough. Unblocking it needs a controlled pair (save before
+  the final boss, beat the game, save clear data to another slot). Details and the full
+  research plan: [issue #1](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/1).
 - **`.psv` / `.max` writing** — Sony signature / LZARI re-encoder respectively.
 
 ---
