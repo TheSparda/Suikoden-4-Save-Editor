@@ -1,23 +1,25 @@
 # Suikoden IV Save Editor
 
-> **▶ [Open the web editor](https://thesparda.github.io/Suikoden-4-Save-Editor/web/)** —
-> edit your saves *and your disc* right in the browser (or install it on Android). Nothing
-> to download, nothing uploaded. Full save parity plus searchable pickers, rune-affinity
-> hints, a bulk Recruit tab, save-in-place/share, and an **ISO Editor** (encounter-rate
-> slider + battle toggles) that writes in place on desktop or streams a patched copy on
-> Android. See [`web/`](web/) for the full rundown.
+> **▶ [Open the editor](https://thesparda.github.io/Suikoden-4-Save-Editor/web/)** — edit
+> your saves *and your disc* right in the browser, or install it on Android. Nothing to
+> download, nothing uploaded.
 
-A cross-platform **save editor** for **Suikoden IV** (PlayStation 2). Edit recruitment,
-levels, stats, runes, equipment, unite attacks, money, and more — directly in your PS2
-saves — and the file is re-checksummed and re-ECC'd so the game loads it normally.
+A **save + ISO editor** for **Suikoden IV** (PlayStation 2) that runs entirely in your
+browser. Edit recruitment, levels, stats, runes, equipment, unite attacks, money, and more
+directly in your PS2 saves — the file is re-checksummed and re-ECC'd so the game loads it
+normally — and scale the random-encounter rate on the disc.
 
-It runs as a small local web app: stdlib-only Python, no install, nothing uploaded. Built
-in the same spirit as the [Suikoden III Editor](https://github.com/TheSparda/Suikoden-3-Editor)
-with one rule throughout: **never write unverified data.** Every offset below was
+Everything runs on your device via [Pyodide](https://pyodide.org) (CPython in WebAssembly);
+your save never leaves the machine. Works on desktop and Android, and installs as an offline
+PWA. One rule throughout: **never write unverified data** — every offset was
 reverse-engineered and verified against real saves before its input appears in the UI.
 
-Supports **NTSC-U** (SLUS-209.79) and **PAL** (SLES-529.13) — the save layout and checksum
-are identical across regions, and each save shows a region badge.
+Supports **NTSC-U** (SLUS-209.79) and **PAL** (SLES-529.13) saves — the save layout and
+checksum are identical across regions, and each save shows a region badge. (ISO editing is
+NTSC-U only.)
+
+> Full UI walkthrough, install/offline details, and the Android flow are in
+> [`web/README.md`](web/README.md).
 
 ---
 
@@ -31,9 +33,12 @@ are identical across regions, and each save shows a region badge.
 | **Weapon level** | 1–15 | Skip the sharpening costs |
 | **Max HP** | 0–9,999 | |
 | **Stats** | STR SKL MAG EVA PDF MDF SPD LUK, 0–999 | |
-| **Runes** | 3 slots, full 42-rune list | |
+| **Runes** | 3 slots, full 42-rune list | Searchable name pickers, with each character's elemental rune affinities shown inline |
 | **Unite attacks** | 0–3 per combo | All **29 combos listed by name** with partner tooltips (e.g. Ted's Bow & Arrow + Barrage 1–4) |
-| **Equipment** | 7 slots (head/body/hands/feet + 3 accessories), 519-item list | |
+| **Equipment** | 7 slots (head/body/hands/feet + 3 accessories), 519-item list | Searchable name pickers |
+
+A per-character **★ Max out** preset (stats, HP, level, weapon Lv, unites) and a bulk
+**Recruit** tab (set recruitment for every character in one place) speed up big edits.
 
 ### Per save
 - **Hero name** and **ship name**
@@ -64,43 +69,30 @@ edit either, convert it to a memory card / `.psu` / `.cbs` first.
 
 ## Safe writes
 
+- Every edit is **staged** and shown in an explicit **old → new review** before it's written.
 - The gamedata **checksum** (CRC32 + byte-reversed MD5) is recomputed on every write, so
   edited saves load normally.
 - Memory-card writes refresh each page's **Hamming ECC**; single-file containers are
   re-packed and then **re-decoded to verify** the payload survived byte-for-byte.
-- A **`.bak`** of the file is made before the first write.
+- Your original file is never touched — edits download an edited *copy* (or write in place
+  only when you pick a file via the browser's File System Access API and confirm).
 - Inputs clamp to the game's own caps (EXP 98,999, weapon level 15, potch 99,999,999, …).
-
-## The UI
-
-- **Auto-scan** finds memory cards and save files near the project, listed as aligned rows
-  (name / folder / badges / size) with a filter box — or use the native **file picker**.
-- **NTSC-U / PAL** badges, a live **checksum-ok** indicator, and a **recruited count** per save.
-- Multi-slot cards start **collapsed**; click a save's header to expand it. The **Write**
-  bar stays pinned while you scroll.
-- Character list with name/# filtering; unrecruited units render dimmed.
-- **Reference tab**: browsable database — 113 characters, 519 items, 42 runes, and the
-  full character-record layout.
-- **ISO Tools tab**: read-only disc inspection (identity/serial, ISO9660 file map, hex
-  explorer + byte search).
-
-Nothing leaves your machine — the server runs locally and only touches the file you point it at.
 
 ---
 
 ## Run
 
-Requires **Python 3.8+** and a modern browser (macOS / Windows / Linux).
+The editor is a static web app. Easiest: just **[open the live site](https://thesparda.github.io/Suikoden-4-Save-Editor/web/)**.
 
-- **macOS:** double-click `Start Editor (Mac).command`
-- **Windows:** double-click `Start Editor (Windows).bat`
-- **Terminal:** `python3 Editor/s4editor.py`
+To run it locally, serve the **repo root** (the app fetches the Python engine + reference
+JSON from `../Editor/` at runtime), then open `web/`:
 
-Then open the printed `http://127.0.0.1:8749`.
+```bash
+python3 -m http.server 8791     # from the repo root
+# open http://localhost:8791/web/
+```
 
-**Quick start:** Save Editor tab → pick a save from the scanned list (or **Choose file…**)
-→ expand a slot → edit → **Write**. A backup is made, the checksum + ECC are rebuilt, and
-the save reloads to confirm.
+That's the only Python needed — it serves the files; the actual editing runs in your browser.
 
 ---
 
@@ -141,16 +133,17 @@ Full notes: [`Editor/Suikoden4_offsets.md`](Editor/Suikoden4_offsets.md).
 The boot ELF's random-encounter logic was reverse-engineered, so the **encounter rate** and
 a couple of battle toggles are editable (this is code in `SLUS_209.79`, not save data):
 
-- **Encounter rate** — the game rolls the threshold as `rand(0..99)`; scaling that range
-  scales the rate (`N = round(10000 / percent)`, so 50% ≈ half as many battles).
+- **Encounter rate** — a slider that scales how often random battles trigger. The game
+  rolls the threshold as `rand(0..99)`; scaling that range scales the rate
+  (`N = round(10000 / percent)`, so 50% ≈ half as many battles).
 - **Champion's Rune effect — always on** — forces the game's own selective suppression
   (skip enemies weaker than the party) party-wide without equipping the rune.
 - **Turn off random battles completely** — replaces the encounter-gate call with a no-op.
 
 Two ways to apply, both **NTSC-U only** and fully reversible:
 
-- **Web ISO Editor** (a slider + toggles) — writes in place on desktop Chromium, or streams
-  a patched copy on Android. See [`web/`](web/).
+- **In the web app's ISO Editor** — writes the changed bytes in place on desktop Chromium,
+  or streams a patched copy of the disc on Android. Nothing is uploaded.
 - **CLI:** [`Editor/s4_encounter_rate.py`](Editor/s4_encounter_rate.py) sets the rate as a
   percentage with an in-place 4-byte edit:
   ```bash
@@ -162,35 +155,32 @@ Full notes: [`Editor/Suikoden4_encounter_rate.md`](Editor/Suikoden4_encounter_ra
 
 ## Not included (and why)
 
-- **Inventory / item bag** — the save holds two parallel equipment-shaped blocks per
-  character and no clean (item, qty) array; pinning which is which safely needs a
-  controlled before/after save. Held back rather than guessed.
 - **New-game character stat tables** — S4 keeps these inside `FILEDATA`'s ~1,000 unlabeled
   sub-archives, consumed by overlay code, with no strings and no static tables in the boot
   ELF (join stats are *computed* from growth curves, not stored). A PCSX2 savestate would
-  unlock this; until then they aren't editable, and the **desktop** ISO tab stays read-only.
-  (Boot-ELF code parameters *are* editable — see ISO editing below.)
+  unlock this; until then they aren't editable.
 - **`.psv` / `.max` writing** — Sony signature / LZARI re-encoder respectively.
 
 ---
 
 ## Layout
 ```
-Editor/
-  s4editor.py            web server + embedded UI
+web/                     the editor — a static browser app (Save + ISO editors, PWA)
+  index.html · style.css · app.js · iso.js · sw.js · manifest.webmanifest · icons/
+  README.md              the web app's own docs (UI, install, Android flow)
+  tests/                 npm test — static checks + a synthetic-fixture engine round-trip
+Editor/                  the save engine + reference data the web app loads at runtime
   s4save.py              PS2 memory-card reader + writer (PS2MFS + ECC) and save codec
   s4files.py             single-file containers (.cbs/.psu/.sps/.psv/.max)
   s4lzari.py             LZARI decoder (ported from mymc) for MAX Drive saves
-  s4patch.py             ISO identity, file map, hex/byte-search tools
   s4_encounter_rate.py   CLI: set the random-encounter rate by % (in-place ISO edit)
   s4_char_offsets.json   113 characters (record offset -> name)
   s4_item_names.json     519 item ids -> names
   s4_rune_names.json     42 rune ids -> names
   s4_unites.json         per-character unite-attack slot names + partners
   s4_affinities.json     per-character rune affinities
-  Suikoden4_offsets.md   reverse-engineering documentation (save layout + checksum)
+  Suikoden4_offsets.md   reverse-engineering notes (save layout + checksum)
   Suikoden4_encounter_rate.md  reverse-engineering notes for the encounter-rate patches
-web/                     browser build (save + ISO editors, PWA) — see web/README.md
 Base ISO/                your Suikoden IV disc image (USA or PAL) — not included
 ```
 
@@ -201,5 +191,5 @@ Feature requests/Support avail on the **Toran Castle Discord**: https://discord.
 Data model derived from the community PCSX2 Cheat Engine tables for Suikoden IV.
 PS2 memory-card ECC, the CodeBreaker RC4 constant, and the LZARI algorithm from `mymc`
 (Ross Ridge, public domain). Unite-attack names from ninjaskipper's GameFAQs Combo
-Attacks guide. Save files, disc images, and third-party guides are **not** included in
-this repository.
+Attacks guide; rune affinities from OmegaDL50's GameFAQs Rune Affinity FAQ. Save files,
+disc images, and third-party guides are **not** included in this repository.

@@ -1,6 +1,6 @@
 /* ===== Suikoden IV Save Editor (Web) — ocean / naval theme =====
    Default (:root) is the deep-sea dark look; [data-theme=light] is the daylight variant.
-   Same palette as the desktop editor (s4editor.py). Mobile-first, safe-area aware. */
+   Ocean/naval palette. Mobile-first, safe-area aware. */
 :root{
   --bg:#0a141e; --panel:#0f2233; --panel2:#143247; --headbg:linear-gradient(180deg,#0f2233,#0a141e);
   --ink:#e8f1f7; --mut:#8fb0c4; --line:#1d4258;
