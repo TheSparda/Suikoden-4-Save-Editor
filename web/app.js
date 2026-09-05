@@ -18,7 +18,7 @@ const GEAR_LABELS = { head: "Head", body: "Body", hands: "Hands", feet: "Feet",
                       acc1: "Accessory 1", acc2: "Accessory 2", acc3: "Accessory 3" };
 const CHAR_CAP = { maxHP: 9999, exp: 98999, weaponLvl: 15 };
 const POTCH_MAX = 99999999;
-const APP_VERSION = "1.6.4";        // keep in lockstep with the footer in index.html
+const APP_VERSION = "1.6.5";        // keep in lockstep with the footer in index.html
 // Elemental rune affinity reference (s4_affinities.json) — teaches which runes suit a unit.
 const AFF_ELEMS = ["Fire", "Lightning", "Water", "Wind", "Earth"];
 const AFF_RATE = { 1: "poor", 2: "average", 3: "good", 4: "excellent" };
@@ -278,7 +278,7 @@ function renderEditor() {
         <span class="muted" id="slotmeta" style="margin-left:auto"></span></div></div>`
     : "";
   ed.innerHTML = slotBar + `<div id="slotbody"></div>`;
-  $$("[data-slot]", ed).forEach((b) => (b.onclick = () => { curSlot = +b.dataset.slot; drawSlot(); }));
+  $$(".slotbar [data-slot]", ed).forEach((b) => (b.onclick = () => { curSlot = +b.dataset.slot; drawSlot(); }));
   drawSlot();
 }
 
@@ -463,7 +463,7 @@ function charCard(c) {
   const runes = [0, 1, 2].map((slot) => {
     const cur = c.runes[slot] || 0;
     return `<label class="field"><span>Rune ${slot + 1}</span>
-      <button type="button" class="picker" data-runeri="${ri}" data-slot="${slot}" data-val="${cur}" data-def="${cur}">${esc(runeLabel(cur))}</button></label>`;
+      <button type="button" class="picker" data-runeri="${ri}" data-runeslot="${slot}" data-val="${cur}" data-def="${cur}">${esc(runeLabel(cur))}</button></label>`;
   }).join("");
 
   const equip = EQUIP_SLOTS.map(([key]) => {
@@ -536,7 +536,7 @@ function wireChar(c) {
   };
   // runes
   $$("button.picker[data-runeri]", body).forEach((btn) => (btn.onclick = () => {
-    const slot = +btn.dataset.slot, cur = +btn.dataset.val;
+    const slot = +btn.dataset.runeslot, cur = +btn.dataset.val;
     openPicker(`Rune ${slot + 1}`, REF.runes, cur, (id) => {
       btn.dataset.val = id; btn.textContent = runeLabel(id);
       btn.classList.toggle("dirty", String(id) !== btn.dataset.def);
