@@ -44,6 +44,9 @@ jobs:
       - name: Confirm the save engine is importable (stdlib only, no pip install)
         run: python3 -c "import sys; sys.path.insert(0, 'Editor'); import s4save, s4files, s4lzari; print('save engine OK')"
 
+      - name: PCSX2 harness selftest (no emulator, disc or BIOS needed)
+        run: python3 tools/pcsx2/selftest.py
+
       - name: Run the test suite
         working-directory: web/tests
         run: npm test
