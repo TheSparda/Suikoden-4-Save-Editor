@@ -15,7 +15,8 @@ const core = createRequire(import.meta.url)(path.resolve(HERE, "..", "s4-core.js
 const { REC_STATES, CHAR_CAP, POTCH_MAX, LV_MAX, AFF_RATE, AFF_ALIAS,
         lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal, revertStaged,
         snapshotFromSave, diffSnapshot, SNAPSHOT_FORMAT, SNAPSHOT_VERSION,
-        derivePartyState, PARTY_MAX, PARTY_REMOVE_TO, IN_PARTY } = core;
+        derivePartyState, PARTY_MAX, PARTY_REMOVE_TO, IN_PARTY,
+        auditSave, applyFix, STAT_MAX } = core;
 
 let failures = 0;
 const ok = (m) => console.log("  ✓ " + m);
@@ -228,6 +229,104 @@ console.log("revertStaged — per-field restore:");
   is([o.saveEdits, o.names, o.charEdits], [{}, {}, {}], "reverting every field leaves all three overlays empty");
   is(buildDiff({ save, saveEdits: o.saveEdits, names: o.names, charEdits: o.charEdits }), [],
      "…and buildDiff reports no changes");
+}
+
+// ---- health lint ----------------------------------------------------------
+console.log("Health lint — the file plus staged edits:");
+{
+  const mk = (over = {}) => ({
+    potch: 1000,
+    characters: [{ rosterIndex: 0, name: "Lazlo", exp: 1000, weaponLvl: 3, maxHP: 100,
+                   recruited: 10, stats: { STR: 50 }, runes: [7, 0, 0], equip: { head: 11 },
+                   ...over }],
+  });
+  const ids = (n) => new Set([...Array(n).keys()].map((i) => i + 1));
+  const audit = (save, opts) => auditSave(save, opts);
+  const idsOf = (fs) => fs.map((f) => f.id);
+
+  is(audit(mk()), [], "a clean save with no staged edits reports nothing");
+  is(audit(null), [], "no save reports nothing rather than throwing");
+
+  // The headline case: a value the engine will silently reduce, caught BEFORE it is written,
+  // quoting what will actually land.
+  const clamp = audit(mk(), { charEdits: { 0: { maxHP: 99999 } } });
+  is(idsOf(clamp), ["clamp-maxHP-0"], "an over-cap staged Max HP is caught before it is written");
+  is(/will be written as 9999/.test(clamp[0].title), true,
+     "…and the finding quotes the value that will actually land");
+  is(clamp[0].sev, "warning", "a silent clamp is a warning, not a problem");
+
+  // It lints the FILE as well as the edits: damage already present is caught with no staging
+  // at all, which is the "catches both" half of the issue.
+  is(idsOf(audit(mk({ maxHP: 99999 }))), ["clamp-maxHP-0"],
+     "an over-cap value already in the file is caught with nothing staged");
+  // ...and a staged edit that FIXES a file problem clears it, proving the overlay really is what
+  // gets audited rather than the file being re-read underneath it.
+  is(audit(mk({ maxHP: 99999 }), { charEdits: { 0: { maxHP: 500 } } }), [],
+     "staging a valid value over a bad file value clears the finding");
+  is(idsOf(audit(mk(), { saveEdits: { potch: POTCH_MAX + 1 } })), ["clamp-potch"],
+     "an over-cap staged potch is caught");
+  is(idsOf(audit(mk(), { charEdits: { 0: { stats: { STR: 5000 } } } })), ["clamp-stat-0-STR"],
+     "an over-cap staged stat is caught");
+  is(idsOf(audit(mk(), { charEdits: { 0: { exp: CHAR_CAP.exp + 1 } } })), ["clamp-exp-0"],
+     "an over-cap staged EXP is caught");
+
+  // Enum purity and the party it implies.
+  is(idsOf(audit(mk(), { charEdits: { 0: { recruited: 7 } } })), ["recruit-enum"],
+     "an out-of-enum recruitment value is a problem");
+  is(audit(mk(), { charEdits: { 0: { recruited: 11 } } }), [],
+     "a valid in-party value is not a finding");
+  {
+    const many = { characters: [0, 1, 2, 3, 4].map((i) => ({ rosterIndex: i, name: "C" + i,
+      recruited: 11, stats: {}, runes: [], equip: {} })) };
+    is(idsOf(audit(many)), ["party-overfull"], "a fifth party member is reported");
+  }
+
+  // Id membership only runs when the table is supplied (rule 1).
+  is(audit(mk({ runes: [999, 0, 0] })), [], "with no rune table, an unknown rune id is NOT reported");
+  is(idsOf(audit(mk({ runes: [999, 0, 0] }), { runeIds: ids(42) })), ["rune-id-0-0"],
+     "with a rune table, an unknown rune id is a problem");
+  is(audit(mk({ runes: [7, 0, 0] }), { runeIds: ids(42) }), [],
+     "a known rune id is not a finding");
+  is(idsOf(audit(mk({ equip: { head: 9999 } }), { itemIds: ids(519) })), ["item-id-0-head"],
+     "an unknown equipment id is a problem");
+  is(audit(mk({ equip: { head: 0 } }), { itemIds: ids(519) }), [],
+     "an empty slot is not an unknown id");
+
+  is(idsOf(audit(mk(), { charEdits: { 0: { exp: -5 } } })), ["exp-negative-0"],
+     "a negative EXP is a problem");
+
+  // Fixes STAGE. They must produce overlays, never touch a save.
+  {
+    const f = audit(mk(), { charEdits: { 0: { maxHP: 99999 } } })[0];
+    const overlays = { saveEdits: {}, charEdits: { 0: { maxHP: 99999 } } };
+    applyFix(overlays, f.fix);
+    is(overlays.charEdits, { 0: { maxHP: CHAR_CAP.maxHP } }, "the fix stages the clamped value");
+    is(audit(mk(), overlays), [], "…and re-auditing after the fix is clean");
+  }
+  {
+    const f = audit(mk({ runes: [999, 0, 0] }), { runeIds: ids(42) })[0];
+    const o = { saveEdits: {}, charEdits: {} };
+    applyFix(o, f.fix);
+    is(o.charEdits, { 0: { runes: { 0: 0 } } }, "clearing a bad rune slot stages a rune edit");
+  }
+  {
+    const o = { saveEdits: {}, charEdits: {} };
+    applyFix(o, { ops: [{ kind: "save", key: "potch", value: 5 }] });
+    is(o.saveEdits, { potch: 5 }, "a save-wide fix stages a save edit");
+  }
+
+  // Every finding either carries a fix or says why it can't be auto-fixed — asserted so a future
+  // check can't quietly ship as an unactionable complaint.
+  {
+    const all = [
+      ...audit(mk(), { charEdits: { 0: { maxHP: 99999, recruited: 7, exp: -1 } } , itemIds: ids(519) }),
+      ...audit(mk({ runes: [999, 0, 0] }), { runeIds: ids(42) }),
+    ];
+    const noFix = all.filter((f) => !f.fix).map((f) => f.id);
+    is(noFix, ["recruit-enum"], "only the finding that needs a human decision lacks a fix");
+    is(all.every((f) => f.title && f.sev && (f.fix ? f.fix.label && f.fix.ops.length : true)), true,
+       "every finding is fully formed");
+  }
 }
 
 // ---- party derivation -----------------------------------------------------

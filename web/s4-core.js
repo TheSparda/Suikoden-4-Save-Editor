@@ -43,6 +43,7 @@
   const AFF_ALIAS = { "Frederica": "Fredrica" };   // roster name → affinity-table key
 
   const LV_MAX = 99;
+  const STAT_MAX = 999;      // the editor's own per-stat input bound
 
   // ---- derived values ------------------------------------------------------
 
@@ -186,6 +187,148 @@
     }
     if (!Object.keys(e).length) delete charEdits[ri];
     return { saveEdits, names, charEdits };
+  }
+
+  // ---- save health lint (#12) ----------------------------------------------
+
+  // A lint over the save PLUS the staged edits, so it catches both damage already in the file and
+  // damage you are about to write. That second half is the point: s4save.py's _clamp() silently
+  // reduces an out-of-range value, so today you can type 99999 HP, see it accepted, and get 9999
+  // with no notice. Every clamp finding quotes the value that will ACTUALLY land.
+  //
+  // House rule 1 throughout: a check whose lookup the caller didn't supply simply doesn't run,
+  // and no finding claims a consequence that isn't derivable from the write path.
+  //
+  //   sev  "problem" — will be written wrong, or is already wrong
+  //        "warning" — will be silently altered on write, or is a reachable bad state
+  //        "note"    — worth knowing; never used for anything actionable
+  //
+  // A finding with `fix` carries ops the caller applies through its normal staging path. Fixes
+  // STAGE, they never write — the review sheet is not optional for them either (rule 2).
+  function auditSave(save, { charEdits = {}, saveEdits = {}, runeIds = null, itemIds = null } = {}) {
+    if (!save) return [];
+    const out = [];
+    const add = (f) => out.push(f);
+    const chars = save.characters || [];
+    // Effective value = staged if present, else the file's. Every check runs on this, which is
+    // what makes the lint see edits you haven't applied yet.
+    const eff = (c, k) => {
+      const e = charEdits[c.rosterIndex];
+      return e && k in e ? e[k] : c[k];
+    };
+    const effStat = (c, n) => {
+      const e = charEdits[c.rosterIndex];
+      return e && e.stats && n in e.stats ? e.stats[n] : (c.stats || {})[n];
+    };
+    const effRune = (c, i) => {
+      const e = charEdits[c.rosterIndex];
+      return e && e.runes && i in e.runes ? e.runes[i] : ((c.runes || [])[i] || 0);
+    };
+
+    // --- values the engine will silently reduce on write ---------------------
+    const clampers = [
+      ["exp", CHAR_CAP.exp, "EXP"],
+      ["weaponLvl", CHAR_CAP.weaponLvl, "Weapon level"],
+      ["maxHP", CHAR_CAP.maxHP, "Max HP"],
+    ];
+    for (const c of chars) {
+      for (const [key, cap, label] of clampers) {
+        const v = eff(c, key);
+        if (Number.isFinite(v) && v > cap) {
+          add({ id: `clamp-${key}-${c.rosterIndex}`, sev: "warning", group: c.name,
+            title: `${label} ${v} will be written as ${cap}`,
+            detail: `The engine clamps ${label.toLowerCase()} to ${cap} on write. The value you typed is not what will land.`,
+            fix: { label: `Set ${cap}`, ops: [{ kind: "char", ri: c.rosterIndex, key, value: cap }] } });
+        }
+      }
+      for (const [st, v] of Object.entries(c.stats || {})) {
+        const ev = effStat(c, st);
+        if (Number.isFinite(ev) && ev > STAT_MAX) {
+          add({ id: `clamp-stat-${c.rosterIndex}-${st}`, sev: "warning", group: c.name,
+            title: `${st} ${ev} will be written as ${STAT_MAX}`,
+            detail: `Stats are stored in one byte pair capped at ${STAT_MAX}.`,
+            fix: { label: `Set ${STAT_MAX}`, ops: [{ kind: "stat", ri: c.rosterIndex, key: st, value: STAT_MAX }] } });
+        }
+      }
+    }
+    const potch = "potch" in saveEdits ? saveEdits.potch : save.potch;
+    if (Number.isFinite(potch) && potch > POTCH_MAX) {
+      add({ id: "clamp-potch", sev: "warning", group: "Save",
+        title: `Potch ${potch} will be written as ${POTCH_MAX}`,
+        detail: "The engine clamps potch on write.",
+        fix: { label: `Set ${POTCH_MAX}`, ops: [{ kind: "save", key: "potch", value: POTCH_MAX }] } });
+    }
+
+    // --- the recruitment enum, and the party it implies ----------------------
+    const badEnum = chars.filter((c) => !REC_STATES.some(([v]) => v === eff(c, "recruited")));
+    if (badEnum.length) {
+      add({ id: "recruit-enum", sev: "problem", group: "Recruitment",
+        title: `${badEnum.length} character${badEnum.length === 1 ? " has" : "s have"} an unknown recruitment value`,
+        detail: badEnum.map((c) => `${c.name}: ${eff(c, "recruited")}`).join(", ")
+          + `. Known values are ${REC_STATES.map(([v, l]) => `${v} (${l})`).join(", ")}.` });
+    }
+    const party = chars.filter((c) => IN_PARTY.includes(eff(c, "recruited")));
+    if (party.length > PARTY_MAX) {
+      add({ id: "party-overfull", sev: "warning", group: "Party",
+        title: `${party.length} characters are in the party; the game fields ${PARTY_MAX}`,
+        detail: party.map((c) => c.name).join(", ") + ". The extras may be ignored." });
+    }
+
+    // --- id membership. Only runs when the caller supplied the table. --------
+    if (runeIds) {
+      for (const c of chars) {
+        for (let i = 0; i < 3; i++) {
+          const v = effRune(c, i);
+          if (v && !runeIds.has(v)) {
+            add({ id: `rune-id-${c.rosterIndex}-${i}`, sev: "problem", group: c.name,
+              title: `Rune ${i + 1} is id ${v}, which is not a known rune`,
+              detail: "Either the reference table is missing this rune, or the value is not a rune id.",
+              fix: { label: "Clear the slot", ops: [{ kind: "rune", ri: c.rosterIndex, key: i, value: 0 }] } });
+          }
+        }
+      }
+    }
+    if (itemIds) {
+      for (const c of chars) {
+        const e = charEdits[c.rosterIndex];
+        for (const [slot, base] of Object.entries(c.equip || {})) {
+          const v = e && e.equip && slot in e.equip ? e.equip[slot] : base;
+          if (v && !itemIds.has(v)) {
+            add({ id: `item-id-${c.rosterIndex}-${slot}`, sev: "problem", group: c.name,
+              title: `${GEAR_LABELS[slot] || slot} is id ${v}, which is not a known item`,
+              detail: "Either the reference table is missing this item, or the value is not an item id.",
+              fix: { label: "Clear the slot", ops: [{ kind: "equip", ri: c.rosterIndex, key: slot, value: 0 }] } });
+          }
+        }
+      }
+    }
+
+    // --- a level shown that the stored EXP doesn't support -------------------
+    for (const c of chars) {
+      const exp = eff(c, "exp");
+      if (!Number.isFinite(exp)) continue;
+      if (exp < 0) {
+        add({ id: `exp-negative-${c.rosterIndex}`, sev: "problem", group: c.name,
+          title: `EXP is negative (${exp})`, detail: "This cannot be written as an unsigned value.",
+          fix: { label: "Set 0", ops: [{ kind: "char", ri: c.rosterIndex, key: "exp", value: 0 }] } });
+      }
+    }
+    return out;
+  }
+
+  // Apply a finding's fix to the three overlays. Mutates in place and returns them, exactly like
+  // revertStaged, so the caller's journal wrapper records it as one ordinary staged edit.
+  function applyFix(overlays, fix) {
+    const { saveEdits = {}, charEdits = {} } = overlays;
+    for (const op of (fix && fix.ops) || []) {
+      if (op.kind === "save") { saveEdits[op.key] = op.value; continue; }
+      const e = (charEdits[op.ri] = charEdits[op.ri] || {});
+      if (op.kind === "char") e[op.key] = op.value;
+      else if (op.kind === "stat") (e.stats = e.stats || {})[op.key] = op.value;
+      else if (op.kind === "rune") (e.runes = e.runes || {})[op.key] = op.value;
+      else if (op.kind === "equip") (e.equip = e.equip || {})[op.key] = op.value;
+    }
+    return overlays;
   }
 
   // ---- party (#11) ---------------------------------------------------------
@@ -395,6 +538,7 @@
     lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal, revertStaged,
     snapshotFromSave, diffSnapshot, SNAPSHOT_FORMAT, SNAPSHOT_VERSION,
     derivePartyState, PARTY_MAX, PARTY_REMOVE_TO, IN_PARTY,
+    auditSave, applyFix, STAT_MAX,
   };
   Object.assign(root, API);
   root.S4Core = API;

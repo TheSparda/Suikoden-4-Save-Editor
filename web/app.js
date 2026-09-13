@@ -290,7 +290,7 @@ function staged(label, key, fn) {
   if (before !== after) {
     JOURNAL.record({ label, key, undo: () => restoreStaged(before), redo: () => restoreStaged(after) });
   }
-  refreshDirty(); refreshReverts();
+  refreshDirty(); refreshReverts(); refreshHealthBadge();
 }
 // Restore one field to the value the file was loaded with — the rule (and why dropping the
 // overlay beats writing a recomputed value back) lives in s4-core.js's revertStaged().
@@ -398,6 +398,7 @@ function drawSlot(keepStaged) {
         <button class="chip" data-sub="chars">Characters (${total})</button>
         <button class="chip" data-sub="recruit">Recruit (${live})</button>
         <button class="chip" data-sub="party">Party (${(s.characters || []).filter((c) => S4Core.IN_PARTY.includes(recOf(c))).length})</button>
+        <button class="chip" data-sub="health" id="healthTab">Health</button>
       </div>
       <input class="search" id="sq" placeholder="filter by name or #…">
       <div class="muted" id="subhint" style="margin:2px 0 10px"></div>
@@ -469,13 +470,18 @@ function drawSlot(keepStaged) {
   refreshUndoButtons();
   showSub();
   refreshReverts();
+  refreshHealthBadge();
 }
 
 // ---- subtab switch ---------------------------------------------------------
 function showSub() {
   $$("[data-sub]").forEach((b) => b.classList.toggle("on", b.dataset.sub === SUB));
   const hint = $("#subhint");
-  if (SUB === "party") {
+  if (SUB === "health") {
+    if (hint) hint.innerHTML = `Checks the save <b>and your staged edits</b> — so it catches damage already in the file ` +
+      `and damage you are about to write. Every fix stages like any other edit and goes through Review changes.`;
+    drawHealth();
+  } else if (SUB === "party") {
     if (hint) hint.innerHTML = `Who is in the active party right now, derived from the same per-character flag the game checks ` +
       `(<b>In Party</b> / <b>Permanently In Party</b>). Removing someone here sets them back to <b>Recruited</b>, never to Not Recruited.`;
     drawParty();
@@ -553,6 +559,53 @@ function drawRecruit() {
       const tr = se.closest("tr");
       if (tr) { tr.classList.toggle("dirtyrow", +se.value !== c.recruited); tr.classList.toggle("unrec", +se.value === 0); }
     });
+  }));
+}
+
+// Save health lint (#12). Runs over the file plus the staged overlays, so a value that will be
+// silently clamped on write is caught before it is written, not after.
+function auditNow() {
+  const s = saves[curSlot];
+  if (!s) return [];
+  return S4Core.auditSave(s, {
+    charEdits: CE, saveEdits: SAVEDITS,
+    // Passed only when loaded — an absent table makes the id checks skip rather than condemn
+    // every id in the save (rule 1).
+    runeIds: REF.runes.length ? new Set(REF.runes.map((r) => r.id)) : null,
+    itemIds: REF.items.length ? new Set(REF.items.map((i) => i.id)) : null,
+  });
+}
+
+function refreshHealthBadge() {
+  const el = $("#healthTab"); if (!el) return;
+  const n = auditNow().filter((f) => f.sev === "problem").length;
+  el.textContent = n ? `Health (${n})` : "Health";
+  el.classList.toggle("has-problems", n > 0);
+}
+
+function drawHealth() {
+  const findings = auditNow();
+  const box = $("#subview");
+  if (!findings.length) {
+    box.innerHTML = `<div class="muted" style="padding:6px 2px">Nothing to report — the save and your staged
+      edits both look sound against every check this editor can make.</div>`;
+    return;
+  }
+  const order = { problem: 0, warning: 1, note: 2 };
+  const sorted = [...findings].sort((a, b) => order[a.sev] - order[b.sev]);
+  box.innerHTML = sorted.map((f, i) => `
+    <div class="hl-row hl-${esc(f.sev)}">
+      <div class="hl-head"><span class="hl-sev">${f.sev === "problem" ? "✗" : f.sev === "warning" ? "⚠" : "·"}</span>
+        <b>${esc(f.title)}</b><span class="muted hl-grp">${esc(f.group || "")}</span></div>
+      ${f.detail ? `<div class="muted">${esc(f.detail)}</div>` : ""}
+      ${f.fix ? `<button type="button" class="chip mini" data-fix="${i}">${esc(f.fix.label)}</button>`
+              : `<div class="muted hl-nofix">No automatic fix — this one needs a decision.</div>`}
+    </div>`).join("");
+  $$("[data-fix]").forEach((b) => (b.onclick = () => {
+    const f = sorted[+b.dataset.fix];
+    staged(`Fix: ${f.title}`, null, () => S4Core.applyFix({ saveEdits: SAVEDITS, charEdits: CE }, f.fix));
+    drawSlot(true);
+    setStatus(`Staged a fix — review it before applying.`, "ok");
   }));
 }
 

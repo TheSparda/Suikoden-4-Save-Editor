@@ -302,3 +302,13 @@ button.picker.dirty { color:var(--warn); border-color:var(--warnbd); background-
 .fnd-note { padding:10px 16px; }
 .fnd-note summary { cursor:pointer; color:var(--mut); font-size:13px; }
 .refdesc { font-size:12px; margin-top:2px; }
+
+/* Health lint (#12) */
+.chip.has-problems { color:var(--warn); border-color:var(--warnbd); }
+.hl-row { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; background:var(--panel); }
+.hl-row.hl-problem { border-color:var(--warnbd); background:var(--changed-bg); }
+.hl-head { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+.hl-sev { flex:none; }
+.hl-grp { margin-left:auto; font-size:12px; }
+.hl-row .chip { margin-top:8px; }
+.hl-nofix { font-size:12px; margin-top:6px; }
