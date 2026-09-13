@@ -314,6 +314,7 @@
     ["encounter", "Encounters", drawEncounters],
     ["changes", "Changes", drawChanges],
     ["text", "Text", drawText],
+    ["files", "Files", drawFiles],
   ];
   const VIEW_KEY = "s4editor-iso-view";
   let VIEW = (() => { try { return localStorage.getItem(VIEW_KEY) || VIEWS[0][0]; } catch (e) { return VIEWS[0][0]; } })();
@@ -409,6 +410,150 @@
       try { localStorage.setItem(VIEW_KEY, VIEW); } catch (e) {}
       drawView();
     }));
+  }
+
+  // ---- packed sub-file browser (#32) ---------------------------------------
+  //
+  // The first user-visible deliverable of the FILEDATA work (#44). S4 has 62,308 packed
+  // sub-files across 1,325 archives; a browser turns that from a wall into a worklist, which is
+  // what makes further reverse engineering something other people can help with.
+  //
+  // The index is built from the user's own disc on demand rather than shipped: the archives tile
+  // their file exactly, so walking the chain is ~1,325 small reads instead of a 1.1 GB scan, and
+  // nothing about the disc has to live in this repo (CLAUDE.md rule 3).
+  //
+  // DELIBERATELY READ-ONLY, and the tab says so. Everything editable inside these files has (or
+  // will have) its own tab; a raw byte editor over tens of thousands of unidentified blobs would
+  // be a footgun rather than a feature.
+  const FILEDATA = {
+    BI1: { lba: 1510597, size: 1074509824 },
+    BI2: { lba: 2035260, size: 60162048 },
+  };
+  let SUBINDEX = null;
+
+  async function buildSubIndex() {
+    if (SUBINDEX || !isoFile) return SUBINDEX;
+    const out = {};
+    for (const [name, meta] of Object.entries(FILEDATA)) {
+      const base = meta.lba * 2048;
+      const archives = [];
+      let cur = 0;
+      while (cur < meta.size - 16) {
+        const head = new Uint8Array(await isoFile.slice(base + cur, base + cur + FiledataCore.HEADER_LEN).arrayBuffer());
+        const h = FiledataCore.parseHeader(head);
+        if (!h) break;
+        archives.push({ off: cur, total: h.total });
+        cur += h.step;
+      }
+      out[name] = { ...meta, archives };
+    }
+    SUBINDEX = out;
+    return out;
+  }
+
+  // Entries are only read when an archive is opened — 62,308 rows at once would be a wall of its
+  // own, and the table is on the disc anyway.
+  async function archiveEntries(fileName, arc) {
+    const base = FILEDATA[fileName].lba * 2048 + arc.off;
+    const first = new Uint8Array(await isoFile.slice(base + 0x10, base + 0x20).arrayBuffer());
+    const head = FiledataCore.parseEntries(first);
+    if (!head || !head.count) return [];              // 0 = a legitimately empty archive
+    const tbl = new Uint8Array(await isoFile.slice(base + 0x10, base + 0x10 + FiledataCore.ROW_LEN * head.count).arrayBuffer());
+    const parsed = FiledataCore.parseEntries(tbl);
+    return parsed ? parsed.entries : [];
+  }
+
+  let FILES_SEL = null;      // { file, arcIndex }
+
+  function drawFiles(host) {
+    host.innerHTML = `<div class="card"><h3 class="sec">Packed files</h3><p class="muted">Reading the archive index…</p></div>`;
+    buildSubIndex().then(() => renderFiles(host)).catch((e) =>
+      (host.innerHTML = `<div class="card"><div class="warnbox">Couldn't read the archives: ${esc(e.message)}</div></div>`));
+  }
+
+  function renderFiles(host) {
+    const tot = Object.values(SUBINDEX).reduce((n, f) => n + f.archives.length, 0);
+    host.innerHTML = `<div class="card">
+      <h3 class="sec">Packed files</h3>
+      <p class="muted" data-sum="A read-only browser over the disc's packed archives. Everything editable inside them has its own tab; a raw byte editor over thousands of unidentified blobs would be a footgun.">
+        <b>Read-only, on purpose.</b> Everything editable inside these archives has, or will have,
+        its own tab — a raw byte editor over tens of thousands of unidentified blobs would be a
+        footgun rather than a feature. This is here so the contents can be <i>looked at</i>:
+        anyone can open a blob, peek at it, and report what they find.
+        The index is built from your own disc; this app ships none of it.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        ${Object.entries(SUBINDEX).map(([n, f]) =>
+          `<button class="chip${FILES_SEL && FILES_SEL.file === n ? " on" : ""}" data-fdfile="${n}">FILEDATA.${n}
+             <span class="pill">${f.archives.length}</span></button>`).join("")}
+        <span class="muted">${tot} archives</span>
+      </div>
+      <div id="fdBody" style="margin-top:10px"></div></div>`;
+    $$("[data-fdfile]").forEach((b) => (b.onclick = () => {
+      FILES_SEL = { file: b.dataset.fdfile, arcIndex: null };
+      renderFiles(host);
+    }));
+    if (FILES_SEL) renderArchiveList(host);
+  }
+
+  function renderArchiveList(host) {
+    const f = SUBINDEX[FILES_SEL.file];
+    const body = $("#fdBody");
+    body.innerHTML = `<div style="max-height:50vh;overflow:auto">
+      <table class="invtbl"><thead><tr><th>#</th><th>Offset in file</th><th>Size</th><th></th></tr></thead><tbody>
+      ${f.archives.slice(0, 600).map((a, i) => `<tr>
+        <td class="sl">${i}</td>
+        <td class="sl">0x${a.off.toString(16).toUpperCase()}</td>
+        <td class="sl">${fmtSize(a.total)}</td>
+        <td><button type="button" class="chip mini" data-fdarc="${i}">open</button></td></tr>`).join("")}
+      </tbody></table></div>
+      ${f.archives.length > 600 ? `<div class="muted" style="padding:8px">showing 600 of ${f.archives.length}</div>` : ""}`;
+    $$("[data-fdarc]").forEach((b) => (b.onclick = async () => {
+      const i = +b.dataset.fdarc;
+      const rows = await archiveEntries(FILES_SEL.file, f.archives[i]);
+      renderEntries(host, i, rows);
+    }));
+  }
+
+  function renderEntries(host, arcIndex, rows) {
+    const f = SUBINDEX[FILES_SEL.file];
+    const arc = f.archives[arcIndex];
+    const body = $("#fdBody");
+    // `flags` is shown raw. It is NOT understood (#45/#46) and labelling it "compressed" would be
+    // asserting something the evidence doesn't support.
+    body.innerHTML = `<div class="row" style="gap:8px;margin-bottom:8px">
+        <button class="chip mini" id="fdBack">← archives</button>
+        <span class="muted">FILEDATA.${esc(FILES_SEL.file)} archive ${arcIndex} @ 0x${arc.off.toString(16).toUpperCase()} — ${rows.length} entries</span></div>
+      ${rows.length ? "" : `<div class="muted">This archive is empty — a header sector and nothing else. 15 of BI1's are like this.</div>`}
+      <div style="max-height:45vh;overflow:auto">
+      <table class="invtbl"><thead><tr><th>id</th><th>flags</th><th>Offset</th><th>Size</th><th></th></tr></thead><tbody>
+      ${rows.slice(0, 500).map((r, i) => `<tr>
+        <td class="sl">0x${r.id.toString(16).toUpperCase().padStart(4, "0")}</td>
+        <td class="sl">${r.flags}</td>
+        <td class="sl">0x${r.off.toString(16).toUpperCase()}</td>
+        <td class="sl">${fmtSize(r.size)}</td>
+        <td><button type="button" class="chip mini" data-fdpeek="${i}">peek</button></td></tr>`).join("")}
+      </tbody></table></div>
+      <div id="fdPeek"></div>`;
+    $("#fdBack").onclick = () => renderArchiveList(host);
+    $$("[data-fdpeek]").forEach((b) => (b.onclick = async () => {
+      const r = rows[+b.dataset.fdpeek];
+      const at = f.lba * 2048 + arc.off + r.off;
+      const buf = new Uint8Array(await isoFile.slice(at, at + 256).arrayBuffer());
+      $("#fdPeek").innerHTML = `<div class="card" style="margin-top:10px">
+        <h4>id 0x${r.id.toString(16).toUpperCase()} — first ${buf.length} bytes</h4>
+        <pre class="hexdump">${esc(hexdump(buf, r.off))}</pre></div>`;
+    }));
+  }
+
+  function hexdump(bytes, base) {
+    const out = [];
+    for (let i = 0; i < bytes.length; i += 16) {
+      const row = [...bytes.slice(i, i + 16)];
+      const hex = row.map((b) => b.toString(16).padStart(2, "0")).join(" ").padEnd(47, " ");
+      const asc = row.map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : ".")).join("");
+      out.push(`${(base + i).toString(16).toUpperCase().padStart(8, "0")}  ${hex}  ${asc}`);
+    }
+    return out.join("\n");
   }
 
   // ---- in-ELF text (#21) ---------------------------------------------------

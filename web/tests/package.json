@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run test:validate && npm run test:core && npm run test:blurb && npm run test:boot && npm run test:vcdiff && npm run test:mod && npm run test:text && npm run test:version && npm run test:nodata && npm run test:roundtrip && npm run test:stock",
+    "test": "npm run test:validate && npm run test:core && npm run test:blurb && npm run test:boot && npm run test:vcdiff && npm run test:mod && npm run test:text && npm run test:filedata && npm run test:version && npm run test:nodata && npm run test:roundtrip && npm run test:stock",
     "test:validate": "node validate.mjs",
     "test:core": "node s4-core.mjs",
     "test:blurb": "node blurb-core.mjs",
@@ -11,6 +11,7 @@
     "test:vcdiff": "node vcdiff.mjs",
     "test:mod": "node modpatch.mjs",
     "test:text": "node text-core.mjs",
+    "test:filedata": "node filedata-core.mjs",
     "test:version": "node version-drift.mjs",
     "test:nodata": "node no-game-data.mjs",
     "test:roundtrip": "node save-roundtrip.mjs",

@@ -313,3 +313,5 @@ button.picker.dirty { color:var(--warn); border-color:var(--warnbd); background-
 .hl-row .chip { margin-top:8px; }
 .hl-nofix { font-size:12px; margin-top:6px; }
 .picker-scope { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:0 14px 8px; font-size:12px; }
+.hexdump { font-family:ui-monospace,Menlo,monospace; font-size:11px; line-height:1.45; overflow-x:auto;
+  margin:0; padding:10px; background:var(--input-bg); border:1px solid var(--line); border-radius:8px; }
