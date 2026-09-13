@@ -188,6 +188,97 @@
     return { saveEdits, names, charEdits };
   }
 
+  // ---- JSON snapshots (#14) ------------------------------------------------
+
+  const SNAPSHOT_FORMAT = "s4save-snapshot";
+  const SNAPSHOT_VERSION = 1;
+
+  // A whole save as human-readable JSON. Deliberately the decoded *values*, not the bytes: it
+  // carries no copyrighted game data, so it can be pasted into a bug report, and it survives a
+  // change of container format because it never mentions one.
+  function snapshotFromSave(save, { app = null } = {}) {
+    if (!save) return null;
+    return {
+      format: SNAPSHOT_FORMAT,
+      version: SNAPSHOT_VERSION,
+      game: "Suikoden IV",
+      app: app || undefined,
+      region: save.region || undefined,
+      exported: new Date().toISOString(),
+      save: {
+        potch: save.potch,
+        gameTimeSec: save.gameTimeSec,
+        names: Object.fromEntries((save.names || []).map((n) => [n.key, n.value])),
+      },
+      characters: (save.characters || []).map((c) => ({
+        rosterIndex: c.rosterIndex,
+        name: c.name,
+        recruited: c.recruited,
+        exp: c.exp,
+        weaponLvl: c.weaponLvl,
+        maxHP: c.maxHP,
+        stats: { ...(c.stats || {}) },
+        runes: [...(c.runes || [])],
+        equip: { ...(c.equip || {}) },
+        unites: [...(c.unites || [])],
+      })),
+    };
+  }
+
+  // Turn a snapshot into staged edits against the loaded save.
+  //
+  // Returns { error } for a snapshot that must not be applied, or { saveEdits, names, charEdits,
+  // skipped } to hand to the normal review-and-Apply path. It never writes: an imported snapshot
+  // is exactly as reviewable as a hand edit (CLAUDE.md rule 2).
+  //
+  // Matching is by rosterIndex, not by name or array position — a snapshot taken before a
+  // rename, or from a save with a different number of decoded characters, still lands on the
+  // right records. A character the loaded save doesn't have is reported in `skipped` rather than
+  // silently dropped, because "nothing happened and I don't know why" is the worst outcome here.
+  function diffSnapshot(save, snap) {
+    if (!save) return { error: "No save is loaded." };
+    if (!snap || typeof snap !== "object") return { error: "That file isn't a snapshot." };
+    if (snap.format !== SNAPSHOT_FORMAT)
+      return { error: `That file is ${snap.format ? `a "${snap.format}"` : "not a snapshot"}, not a Suikoden IV save snapshot.` };
+    if (typeof snap.version !== "number" || snap.version > SNAPSHOT_VERSION)
+      return { error: `That snapshot was written by a newer version of this editor (format v${snap.version}); this build understands v${SNAPSHOT_VERSION}.` };
+
+    const saveEdits = {}, names = {}, charEdits = {}, skipped = [];
+    const s = snap.save || {};
+
+    if (Number.isFinite(s.potch) && s.potch !== save.potch) saveEdits.potch = s.potch;
+    if (Number.isFinite(s.gameTimeSec) && s.gameTimeSec !== save.gameTimeSec) saveEdits.gameTime = s.gameTimeSec;
+    for (const [k, v] of Object.entries(s.names || {})) {
+      const cur = (save.names || []).find((n) => n.key === k);
+      if (!cur) { skipped.push(`name "${k}"`); continue; }
+      if (typeof v === "string" && v !== cur.value) names[k] = v;
+    }
+
+    const byRi = new Map((save.characters || []).map((c) => [c.rosterIndex, c]));
+    for (const sc of snap.characters || []) {
+      const c = byRi.get(sc.rosterIndex);
+      if (!c) { skipped.push(`character #${sc.rosterIndex}${sc.name ? ` (${sc.name})` : ""}`); continue; }
+      const e = {};
+      for (const k of ["recruited", "exp", "weaponLvl", "maxHP"]) {
+        if (Number.isFinite(sc[k]) && sc[k] !== c[k]) e[k] = sc[k];
+      }
+      for (const [st, v] of Object.entries(sc.stats || {})) {
+        if (Number.isFinite(v) && v !== (c.stats || {})[st]) (e.stats = e.stats || {})[st] = v;
+      }
+      (sc.runes || []).forEach((v, i) => {
+        if (Number.isFinite(v) && v !== ((c.runes || [])[i] || 0)) (e.runes = e.runes || {})[i] = v;
+      });
+      for (const [slot, v] of Object.entries(sc.equip || {})) {
+        if (Number.isFinite(v) && v !== ((c.equip || {})[slot] || 0)) (e.equip = e.equip || {})[slot] = v;
+      }
+      (sc.unites || []).forEach((v, i) => {
+        if (Number.isFinite(v) && v !== ((c.unites || [])[i] || 0)) (e.unites = e.unites || {})[i] = v;
+      });
+      if (Object.keys(e).length) charEdits[sc.rosterIndex] = e;
+    }
+    return { saveEdits, names, charEdits, skipped };
+  }
+
   // ---- staging journal (undo / redo) ---------------------------------------
 
   // A generic edit journal. It knows nothing about saves, discs or the DOM — a caller records a
@@ -259,6 +350,7 @@
     REC_STATES, STAT_NAMES, GEAR_LABELS, CHAR_CAP, POTCH_MAX, LV_MAX,
     AFF_ELEMS, AFF_RATE, AFF_ALIAS,
     lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal, revertStaged,
+    snapshotFromSave, diffSnapshot, SNAPSHOT_FORMAT, SNAPSHOT_VERSION,
   };
   Object.assign(root, API);
   root.S4Core = API;

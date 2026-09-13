@@ -363,6 +363,11 @@ function drawSlot(keepStaged) {
       <div class="muted" style="margin:-2px 0 8px">${metaBits}</div>
       <div class="row" style="margin-bottom:6px">${cksum}</div>
       ${roNote}
+      <div class="row" style="gap:8px;margin:2px 0 10px">
+        <button type="button" class="chip mini" id="snapExport" title="Save every decoded value as JSON — no game data, safe to attach to a bug report">⬇ Export JSON</button>
+        <label class="chip mini" id="snapImportLabel" style="cursor:pointer" title="Load a snapshot; its differences are staged for review, never written directly">⬆ Import JSON
+          <input type="file" id="snapImport" accept=".json,application/json" style="display:none"></label>
+      </div>
       <h3 class="sec">Names</h3>
       <div class="grid">${names}</div>
       <h3 class="sec">Money &amp; time</h3>
@@ -443,6 +448,8 @@ function drawSlot(keepStaged) {
   const shb = $("#shareBtn"); if (shb) shb.onclick = () => applyEdits("share");
   // Revert all drops every staged edit but stays undoable — it is the most destructive control
   // in the editor, and before #3/#4 it silently discarded the lot.
+  const se = $("#snapExport"); if (se) se.onclick = exportSnapshot;
+  const si = $("#snapImport"); if (si) si.onchange = (e) => { const f = e.target.files[0]; if (f) importSnapshot(f); e.target.value = ""; };
   const rb = $("#resetBtn"); if (rb) rb.onclick = () => {
     if (!countEffective()) return;
     staged("Revert all", null, () => { CE = {}; NAMES = {}; SAVEDITS = {}; });
@@ -729,6 +736,56 @@ function applyPresetInner(ri, body) {
   const us = $$('input[data-uri]', body);
   if (us.length) { e.unites = e.unites || {}; us.forEach((inp) => { mark(inp, 3); e.unites[inp.dataset.uslot] = 3; }); }
   setStatus(`Staged "Max out" for ${charByRoster(ri)?.name || "#" + ri} — review before applying.`, "");
+}
+
+// ---- JSON snapshots (#14) --------------------------------------------------
+// Export is the whole decoded save as readable JSON. It contains no copyrighted game data — only
+// values the user's own save already held — so it is safe to paste into an issue, which makes it
+// the best bug-report format this project can have.
+function exportSnapshot() {
+  const s = saves[curSlot];
+  if (!s) return;
+  const snap = S4Core.snapshotFromSave(s, { app: APP_VERSION });
+  const name = (downloadName().replace(/\.[^.]+$/, "") || "suikoden4") + ".snapshot.json";
+  downloadBytes(new TextEncoder().encode(JSON.stringify(snap, null, 2)), name);
+  setStatus(`Exported ${snap.characters.length} characters to ${name}.`, "ok");
+}
+
+// Import stages the differences through the normal review path — it never writes. An imported
+// snapshot is exactly as reviewable, undoable and revertible as a hand edit.
+async function importSnapshot(file) {
+  const s = saves[curSlot];
+  if (!s) return;
+  let snap;
+  try { snap = JSON.parse(await file.text()); }
+  catch (e) { return setStatus("That file isn't valid JSON: " + e.message, "err"); }
+
+  const d = S4Core.diffSnapshot(s, snap);
+  if (d.error) return setStatus(d.error, "err");
+
+  const rows = S4Core.buildDiff({ save: s, saveEdits: d.saveEdits, names: d.names,
+    charEdits: d.charEdits, labels: { item: itemLabel, rune: runeLabel } });
+  if (!rows.length) {
+    return setStatus(d.skipped.length
+      ? `Snapshot matches this save — nothing to change. Skipped: ${d.skipped.join(", ")}.`
+      : "Snapshot matches this save exactly — nothing to change.", "ok");
+  }
+  if (d.skipped.length) rows.push({ g: "Not applied", t: d.skipped.join(", ") + " — not in this save" });
+
+  openConfirm(rows, () => {
+    staged(`Import snapshot (${rows.length})`, null, () => {
+      Object.assign(SAVEDITS, d.saveEdits);
+      Object.assign(NAMES, d.names);
+      for (const [ri, e] of Object.entries(d.charEdits)) {
+        const t = ce(ri);
+        for (const [k, v] of Object.entries(e)) {
+          if (v && typeof v === "object") Object.assign(t[k] = t[k] || {}, v); else t[k] = v;
+        }
+      }
+    });
+    drawSlot(true);
+    setStatus(`Staged ${rows.length} change${rows.length === 1 ? "" : "s"} from the snapshot — review and apply.`, "ok");
+  }, "Stage these changes");
 }
 
 // ---- dirty tracking / unsaved badge ----------------------------------------

@@ -13,7 +13,8 @@ import { fileURLToPath } from "url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const core = createRequire(import.meta.url)(path.resolve(HERE, "..", "s4-core.js"));
 const { REC_STATES, CHAR_CAP, POTCH_MAX, LV_MAX, AFF_RATE, AFF_ALIAS,
-        lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal, revertStaged } = core;
+        lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal, revertStaged,
+        snapshotFromSave, diffSnapshot, SNAPSHOT_FORMAT, SNAPSHOT_VERSION } = core;
 
 let failures = 0;
 const ok = (m) => console.log("  ✓ " + m);
@@ -226,6 +227,67 @@ console.log("revertStaged — per-field restore:");
   is([o.saveEdits, o.names, o.charEdits], [{}, {}, {}], "reverting every field leaves all three overlays empty");
   is(buildDiff({ save, saveEdits: o.saveEdits, names: o.names, charEdits: o.charEdits }), [],
      "…and buildDiff reports no changes");
+}
+
+// ---- JSON snapshots -------------------------------------------------------
+console.log("Snapshots — export / import:");
+{
+  const snap = snapshotFromSave(save, { app: "1.6.5" });
+  is([snap.format, snap.version, snap.game], [SNAPSHOT_FORMAT, SNAPSHOT_VERSION, "Suikoden IV"],
+     "a snapshot names its format, version and game");
+  is(snap.characters.length, save.characters.length, "every decoded character is included");
+  is(snap.save.names, { hero: "Lazlo" }, "names are exported keyed, not positional");
+
+  // The property that makes this safe to attach to a bug report.
+  const text = JSON.stringify(snap);
+  is(/item|rune/i.test(text) && /Item\d|Rune\d/.test(text), false,
+     "a snapshot carries values, never resolved game text");
+
+  // The acceptance criterion: a round trip with nothing changed stages nothing.
+  const rt = diffSnapshot(save, JSON.parse(JSON.stringify(snap)));
+  is([rt.error, rt.skipped], [undefined, []], "an untouched snapshot imports without error");
+  is(buildDiff({ save, ...rt }), [], "export → import on an unmodified save stages ZERO changes");
+
+  // ...and one hand edit stages exactly one reviewable change.
+  const edited = JSON.parse(JSON.stringify(snap));
+  edited.characters[0].maxHP = 777;
+  const one = diffSnapshot(save, edited);
+  is(one.charEdits, { 0: { maxHP: 777 } }, "one hand-edited field produces exactly one staged edit");
+  is(buildDiff({ save, ...one, labels }), [{ g: "Lazlo", t: "Max HP: 100 → 777" }],
+     "…and exactly one reviewable row");
+
+  // Matching is by rosterIndex, so a snapshot taken before a rename still lands correctly.
+  const renamed = JSON.parse(JSON.stringify(snap));
+  renamed.characters[0].name = "Someone Else";
+  renamed.characters[0].exp = 9000;
+  is(diffSnapshot(save, renamed).charEdits, { 0: { exp: 9000 } },
+     "a character renamed in the snapshot still matches by roster index");
+
+  // A character the loaded save doesn't have is reported, never silently dropped.
+  const extra = JSON.parse(JSON.stringify(snap));
+  extra.characters.push({ rosterIndex: 99, name: "Ghost", maxHP: 5 });
+  const ex = diffSnapshot(save, extra);
+  is(ex.skipped, ["character #99 (Ghost)"], "a character not in this save is reported as skipped");
+  is(ex.charEdits, {}, "…and stages nothing for it");
+
+  // Refusals.
+  is(diffSnapshot(save, { format: "s3save-snapshot", version: 1 }).error !== undefined, true,
+     "a snapshot from another game is refused");
+  is(/s3save-snapshot/.test(diffSnapshot(save, { format: "s3save-snapshot", version: 1 }).error), true,
+     "…and the message says what it actually was");
+  is(diffSnapshot(save, { format: SNAPSHOT_FORMAT, version: SNAPSHOT_VERSION + 1 }).error !== undefined, true,
+     "a snapshot from a newer build is refused rather than half-read");
+  is(diffSnapshot(save, null).error !== undefined, true, "a non-object is refused");
+  is(diffSnapshot(null, snap).error !== undefined, true, "importing with no save loaded is refused");
+
+  // Junk values must not stage. A snapshot is user-editable text, so this is a real input.
+  const junk = JSON.parse(JSON.stringify(snap));
+  junk.characters[0].maxHP = "lots";
+  junk.characters[0].exp = null;
+  junk.save.potch = "9999";
+  const jd = diffSnapshot(save, junk);
+  is([jd.charEdits, jd.saveEdits], [{}, {}],
+     "non-numeric values in a hand-edited snapshot are ignored, not coerced");
 }
 
 // ---- staging journal ------------------------------------------------------
