@@ -22,7 +22,7 @@ Suikoden4_offsets.md). Over body = gamedata[0x20:0x20+0xE240]:
 Write-back recomputes both, then refreshes each memcard page's Hamming ECC. A backup
 of the whole card is made before the first write.
 """
-import struct, os, shutil, hashlib, zlib
+import struct, os, shutil, hashlib, zlib, json
 import s4files as FILES   # individual save-file containers (.cbs/.sps/.psu/.max)
 
 MAGIC = b"Sony PS2 Memory Card Format"
@@ -442,6 +442,131 @@ def decode_characters(gamedata):
     return [c for c in (decode_character(gamedata, i) for i in range(n)) if c]
 
 
+# --- decode-time invariants (#15) -------------------------------------------------
+#
+# A save carries an independent witness to some of its own contents: the PS2 browser title in
+# icon.sys ("Suikoden4 [NN] LVLnn / H:MM") is written by the game from the same state, so the
+# level and playtime it reports can be checked against the bytes we decoded. That cross-check ran
+# once during reverse engineering; there is no reason it shouldn't run on every load.
+#
+# The rest are invariants a correct layout cannot violate: enum purity, engine caps, and id
+# membership in the reference tables. The id checks are the sharp ones — a window that has
+# drifted off the real record shows up immediately as ids that aren't ids, which is exactly how
+# issue #48 surfaced.
+#
+# Severity is a documented split, not a guess:
+#   "error" — the save is damaged or the layout is wrong; editing is unsafe.
+#   "warn"  — real, but has a known benign explanation (see each check).
+#   "note"  — informational; never cry wolf with these.
+#
+# Findings are returned, never raised: a save that fails a check is still worth showing, and the
+# UI decides how loud to be.
+
+def _ref_ids(name):
+    """Ids from a reference table next to this module, or None if it isn't there.
+
+    Returning None rather than an empty set matters: an absent table must make the check SKIP,
+    not fail every id in the save (CLAUDE.md rule 1)."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), name), encoding="utf-8") as fh:
+            return {int(k, 16) for k in json.load(fh).keys()}
+    except Exception:
+        return None
+
+
+def check_invariants(gamedata, save, meta=None):
+    """Cross-check a decoded save against its own witness and against layout invariants.
+
+    Returns a list of {id, sev, title, detail}. Empty means everything that could be checked
+    passed; a check whose input is missing does not appear at all rather than passing vacuously.
+    """
+    out = []
+    add = lambda i, sev, t, d: out.append({"id": i, "sev": sev, "title": t, "detail": d})
+    chars = save.get("characters") or []
+
+    # 1-2. the save's own browser title, written by the game from the same state
+    meta = meta or {}
+    hero = next((c for c in chars if c.get("rosterIndex") == 0), None)
+    if hero and meta.get("level"):
+        lv = min(99, (hero.get("exp") or 0) // 1000 + 1)
+        if lv != meta["level"]:
+            add("title-level", "warn", "Level disagrees with the save's own title",
+                f"EXP {hero.get('exp')} decodes to Lv {lv}, but the PS2 browser title says "
+                f"LVL{meta['level']}. The title tracks the party leader, which is not always "
+                f"roster 0, so this is expected on some saves.")
+    if meta.get("playtime"):
+        try:
+            h, m = (int(x) for x in meta["playtime"].split(":"))
+            secs = save.get("gameTimeSec") or 0
+            if abs(secs - (h * 3600 + m * 60)) > 120:
+                add("title-playtime", "warn", "Playtime disagrees with the save's own title",
+                    f"{secs}s decoded vs {meta['playtime']} in the title (allowing 2 minutes).")
+        except ValueError:
+            pass
+
+    # 3. recruitment enum purity — the byte the game itself switches on
+    bad = sorted({c["recruited"] for c in chars if c.get("recruited") not in RECRUIT_STATES})
+    if bad:
+        add("recruit-enum", "error", "Unknown recruitment values",
+            f"{', '.join(str(b) for b in bad)} — not one of {sorted(RECRUIT_STATES)}. "
+            f"Either the save is damaged or the recruitment array has moved.")
+
+    # 4. engine caps. These are what _clamp() will silently reduce on write.
+    over = [(c["name"], c["exp"]) for c in chars if (c.get("exp") or 0) > EXP_MAX]
+    if over:
+        add("exp-cap", "warn", "EXP above the engine cap",
+            "; ".join(f"{n}: {v} > {EXP_MAX}" for n, v in over[:6]))
+    over = [(c["name"], c["weaponLvl"]) for c in chars if (c.get("weaponLvl") or 0) > WLVL_MAX]
+    if over:
+        add("wlvl-cap", "warn", "Weapon level above the engine cap",
+            "; ".join(f"{n}: {v} > {WLVL_MAX}" for n, v in over[:6]))
+    if (save.get("potch") or 0) > POTCH_MAX:
+        add("potch-cap", "warn", "Potch above the engine cap",
+            f"{save['potch']} > {POTCH_MAX}")
+
+    # 5. id membership. The sharpest layout check available: a window that has drifted off the
+    #    real record reads values that are not ids at all. This is what exposed #48.
+    runes, items = _ref_ids("s4_rune_names.json"), _ref_ids("s4_item_names.json")
+    if runes:
+        seen = [(c["name"], r) for c in chars for r in (c.get("runes") or []) if r]
+        bad = [(n, r) for n, r in seen if r not in runes]
+        if bad and seen:
+            pct = 100.0 * len(bad) / len(seen)
+            add("rune-ids", "error" if pct > 10 else "warn",
+                f"{len(bad)} of {len(seen)} equipped runes are not known rune ids ({pct:.0f}%)",
+                "A few unknown ids can be a reference table that is missing entries. A large "
+                "share means the rune window is not pointing at the rune data — see issue #48. "
+                + "; ".join(f"{n}: {r}" for n, r in bad[:6]))
+    if items:
+        seen = [(c["name"], i) for c in chars for i in (c.get("equip") or {}).values() if i]
+        bad = [(n, i) for n, i in seen if i not in items]
+        if bad and seen:
+            pct = 100.0 * len(bad) / len(seen)
+            add("item-ids", "error" if pct > 10 else "warn",
+                f"{len(bad)} of {len(seen)} equipped items are not known item ids ({pct:.0f}%)",
+                "; ".join(f"{n}: {i}" for n, i in bad[:6]))
+
+    # 6. the checksum the game itself verifies
+    if not save.get("checksumValid"):
+        add("checksum", "error", "Checksum does not match",
+            "The CRC32/MD5 stored in the save disagree with its body. The game may refuse it. "
+            "Editing and saving recomputes both, which will make it valid again — but if this "
+            "save was not edited by this tool, treat the contents as suspect.")
+
+    # 7. a stat block where SKL always equals MAG is the signature of a window straddling a
+    #    record boundary rather than real data (#48). Cheap, and it catches a whole bug class.
+    with_stats = [c for c in chars if any((c.get("stats") or {}).values())]
+    if len(with_stats) >= 8:
+        dup = sum(1 for c in with_stats if c["stats"].get("SKL") == c["stats"].get("MAG"))
+        if dup >= 0.9 * len(with_stats):
+            add("stat-alias", "error",
+                "Stats look misaligned (SKL equals MAG on nearly every character)",
+                f"{dup} of {len(with_stats)} characters. Identical SKL and MAG across the roster "
+                f"is what a stat window reading across a record boundary looks like, not a real "
+                f"save. See issue #48.")
+    return out
+
+
 def decode_save(gamedata):
     """Decode one save's gamedata payload (header + names + characters)."""
     names = [{"key": key, "label": label, "value": _read_str(gamedata, off, n), "max": n}
@@ -604,6 +729,9 @@ def _save_dict(gd, folder, *, container="memcard", writable=True, note="", meta=
     if note:
         dec["note"] = note
     dec["meta"] = meta or {}
+    # Cross-check as it decodes (#15), so a save that doesn't decode cleanly says so BEFORE the
+    # user edits it. Needs the icon.sys title, which only exists at this level.
+    dec["findings"] = check_invariants(gd, dec, dec["meta"])
     for nm in dec["names"]:
         nm["folder"] = folder
     return dec

@@ -358,6 +358,7 @@ function drawSlot(keepStaged) {
   const total = (s.characters || []).length;
 
   $("#slotbody").innerHTML = `
+    ${findingsHtml(s.findings || [])}
     <div class="card">
       <div class="muted" style="margin:-2px 0 8px">${metaBits}</div>
       <div class="row" style="margin-bottom:6px">${cksum}</div>
@@ -471,6 +472,23 @@ function showSub() {
 }
 
 // ---- Characters ------------------------------------------------------------
+// Decode-time invariants (#15). An error means the save did not decode cleanly and editing is
+// unsafe; a warning is real but has a known benign explanation. The split is a documented list in
+// s4save.check_invariants, not a severity guess here — and the loud case stays loud precisely
+// because the quiet cases are not dressed up as it.
+function findingsHtml(findings) {
+  if (!findings.length) return "";
+  const errs = findings.filter((f) => f.sev === "error");
+  const rest = findings.filter((f) => f.sev !== "error");
+  const row = (f) => `<div class="fnd-row"><b>${esc(f.title)}</b><div class="muted">${esc(f.detail)}</div></div>`;
+  return (errs.length ? `<div class="warnbox fnd-err" role="alert">
+      <b>This save did not decode cleanly (${errs.length})</b>
+      <div class="muted" style="margin:4px 0 8px">Editing it may write to the wrong bytes. Back up before saving.</div>
+      ${errs.map(row).join("")}</div>` : "")
+    + (rest.length ? `<details class="card fnd-note"><summary>${rest.length} decode note${rest.length === 1 ? "" : "s"}</summary>
+      ${rest.map(row).join("")}</details>` : "");
+}
+
 function charByRoster(ri) { return saves[curSlot].characters.find((c) => c.rosterIndex === ri); }
 // staged recruitment value for a character (falls back to the loaded value)
 function recOf(c) { const e = CE[c.rosterIndex]; return (e && "recruited" in e) ? e.recruited : c.recruited; }

@@ -60,6 +60,98 @@ def build_container(payload):
     return header + payload
 
 
+# --- decode-time invariants (#15) ------------------------------------------------
+# Built from the engine's own constants, never from a real save (CLAUDE.md rule 3). Each case
+# plants exactly one defect and asserts exactly which finding fires — a check that can't be shown
+# to fire on a broken save is not a check.
+#
+# Every mutated payload is re-checksummed. Otherwise the checksum finding fires on every case and
+# masks whether the *intended* defect was detected, which is the difference between a test and a
+# test-shaped thing.
+def _findings(payload, meta=None):
+    payload = SV.recompute_checksums(bytes(payload))
+    return {f["id"] for f in SV.check_invariants(payload, SV.decode_save(payload), meta or {})}
+
+
+def _check_invariants():
+    base = build_payload()
+    clean = _findings(base)
+    check("a clean synthetic save produces no errors",
+          not [f for f in SV.check_invariants(base, SV.decode_save(base), {}) if f["sev"] == "error"],
+          ", ".join(sorted(clean)) or "none")
+
+    # Recruitment enum purity. Roster 0 is the one build_payload() populates, so it is the one
+    # that survives the hasData filter in decode_save.
+    b = bytearray(base)
+    b[SV.RECRUIT_BASE] = 7                                   # not one of the five
+    check("an out-of-enum recruitment byte is an error", "recruit-enum" in _findings(b))
+
+    # Engine caps — the values _clamp() would silently reduce on write.
+    b = bytearray(base)
+    struct.pack_into("<I", b, SV.POTCH_OFF, SV.POTCH_MAX + 1)
+    check("potch over the cap is flagged", "potch-cap" in _findings(b))
+
+    b = bytearray(base)
+    struct.pack_into("<I", b, SV.PROG_BASE + SV.OFF_PROG_EXP, SV.EXP_MAX + 1)
+    check("EXP over the cap is flagged", "exp-cap" in _findings(b))
+
+    # The save's own independent witness: the PS2 browser title.
+    d = SV.decode_save(base)
+    hero = next((c for c in d["characters"] if c["rosterIndex"] == 0), None)
+    if hero:
+        lv = min(99, (hero["exp"] or 0) // 1000 + 1)
+        check("a title agreeing with the decoded level says nothing",
+              "title-level" not in _findings(base, {"level": lv}))
+        check("a title disagreeing with the decoded level is reported",
+              "title-level" in _findings(base, {"level": lv + 20}))
+        check("a playtime far from the decoded game time is reported",
+              "title-playtime" in _findings(base, {"playtime": "99:00"}))
+        check("a playtime matching the decoded game time says nothing",
+              "title-playtime" not in _findings(base, {"playtime": "1:00"}))
+
+    # An unknown id is only meaningful against a table. With no table the check must SKIP rather
+    # than fail every id in the save (CLAUDE.md rule 1).
+    b = bytearray(base)
+    b[SV.CHAR_BASE + SV.OFF_RUNES[0]] = 0xFE                 # not a known rune id
+    check("an unknown rune id is reported", "rune-ids" in _findings(b))
+    real = SV._ref_ids
+    try:
+        SV._ref_ids = lambda name: None
+        check("no reference table means the id checks don't run, rather than failing everything",
+              "rune-ids" not in _findings(b) and "item-ids" not in _findings(b))
+    finally:
+        SV._ref_ids = real
+
+    # A damaged body is the one case where the checksum finding is the point.
+    b = bytearray(base)
+    b[SV.BODY_OFF + 64] ^= 0xFF
+    check("a body that disagrees with its stored checksum is an error",
+          "checksum" in {f["id"] for f in SV.check_invariants(bytes(b), SV.decode_save(bytes(b)), {})})
+
+    # The #48 signature. Needs enough populated records to be meaningful, so the fixture is
+    # widened here rather than asserted against a roster of one.
+    b = bytearray(base)
+    planted = 0
+    for i in range(12):
+        off = SV.CHAR_BASE + i * SV.CHAR_STRIDE
+        if off + SV.CHAR_STRIDE > len(b):
+            break
+        struct.pack_into("<8H", b, off + SV.OFF_STATS, 50, 77, 77, 60, 61, 62, 63, 64)
+        struct.pack_into("<H", b, off + SV.OFF_MAXHP, 200 + i)
+        b[SV.RECRUIT_BASE + i * SV.RECRUIT_STRIDE] = 10
+        planted += 1
+    check("SKL == MAG across the roster is reported as misalignment",
+          planted >= 8 and "stat-alias" in _findings(b), "%d records planted" % planted)
+
+    # ...and the same fixture with distinct stats must NOT trip it, or the check is just noise.
+    b2 = bytearray(b)
+    for i in range(planted):
+        off = SV.CHAR_BASE + i * SV.CHAR_STRIDE
+        struct.pack_into("<8H", b2, off + SV.OFF_STATS, 50, 77, 88, 60, 61, 62, 63, 64)
+    check("distinct SKL and MAG does not trip the misalignment check",
+          "stat-alias" not in _findings(b2))
+
+
 def main():
     print("Save-engine round-trip (synthetic S4 gamedata):")
     tmp = tempfile.mkdtemp(prefix="s4save-test-")
@@ -129,6 +221,9 @@ def main():
     flipped = bytearray(512)
     flipped[0] = 0x01
     check("ecc changes when a byte flips (detects corruption)", SV.ecc_page(bytes(flipped)) != zero)
+
+    print("\nDecode-time invariants (#15):")
+    _check_invariants()
 
     print("\n%s" % ("All save round-trip checks passed." if fails == 0 else "%d check(s) FAILED." % fails))
     return 1 if fails else 0

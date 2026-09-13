@@ -293,3 +293,11 @@ button.picker.dirty { color:var(--warn); border-color:var(--warnbd); background-
 .boot-acts button { flex:1 1 auto; }
 .bar-fill.err { background:var(--crimson); }
 @media (prefers-reduced-motion:reduce) { .boot-ov { transition:none; } }
+
+/* Decode-time invariant findings (#15) */
+.fnd-err { margin-bottom:16px; }
+.fnd-row { padding:6px 0; border-top:1px solid var(--line); }
+.fnd-row:first-of-type { border-top:0; }
+.fnd-row b { font-weight:600; }
+.fnd-note { padding:10px 16px; }
+.fnd-note summary { cursor:pointer; color:var(--mut); font-size:13px; }
