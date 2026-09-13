@@ -444,3 +444,87 @@ screen, save, and read both candidate offsets. Deliberately **not** guessed at h
 the character-record decoder is the most dangerous change available in this repo, and a partial
 fix that corrects Max HP while leaving runes on a frame that may also be wrong could make things
 worse than the present state. Tracked as a bug issue with this evidence attached.
+
+---
+
+## 2026-09-13 — FILEDATA swept in full; an earlier conclusion here was wrong
+
+Follow-up to the 2026-09-12 entry. The outer index is now a committed tool
+(`Editor/build_s4_subfile_index.py`, issue #44) and the flags=2 population has been swept
+end to end rather than sampled.
+
+### CORRECTION: "flags=2 payloads look uncompressed" was based on a biased sample
+
+The previous entry reported six flags=2 payloads at 1.00× ratio and 4.9–6.7 bits/byte entropy,
+and drew a tentative conclusion from it. **That sample was biased and the conclusion does not
+hold.** All six were the *first* flags=2 entry of their archive, which is consistently
+float/geometry data. Across the whole population it looks nothing like that:
+
+| entropy (bits/byte, rounded) | payloads |
+|---|---|
+| 0–3 | 547 |
+| 4 | 547 |
+| 5 | 968 |
+| 6 | 3,165 |
+| **7** | **14,249** |
+| **8** | **1,354** |
+
+21,153 flags=2 entries examined. The bulk sits at 7–8 bits/byte, which is compressed-*looking*.
+The earlier entry's own caveat — *"six samples do not settle a 21,153-member population, they
+only move the prior"* — turned out to be the operative sentence. Kept here rather than edited
+away, per the convention.
+
+### What the sweep does establish
+
+**The +16 rule is exact.** `size - (next.offset - this.offset) == 16` for **20,830 of 20,830**
+flags=2 entries that have a successor. (The remaining 323 are last-in-archive and have no gap to
+measure — the earlier entry's "20,830 of 20,830" was over measurable pairs, not over all 21,153.)
+
+**No codec has been found, and four are now excluded with evidence:**
+
+- **zlib** — 0 successes.
+- **raw deflate** — 199 apparent successes, **all verified spurious**. Raw deflate is headerless,
+  so arbitrary bytes can parse as a valid block: the 29 checked in BI2 inflate 2,160 bytes into
+  48–452 bytes of a single repeated value (`0x8e`), and the inflated length matches the declared
+  size in **0 of 29** cases.
+- **LZMA** — 0 successes.
+- **LZARI** (`s4lzari.decode`, the decoder this repo already ships) — returns `out_length` bytes
+  **by construction**, so output length proves nothing. Tried at skips 0/4/8/16 on the
+  highest-entropy payload; the only non-throwing skips produce near-uniform `0x20` padding, which
+  is degenerate rather than plausible.
+
+**Some high-entropy payloads are visibly structured**, which argues against compression for at
+least part of the population: id `0x178E` in BI1 archive 0 measures 7.50 bits/byte but its bytes
+read `c0 0f 40 00 40 00 c0 0f 40 00 …` — a repeating 4-byte pattern, consistent with PS2 GPU
+packet or vertex data.
+
+So `flags=2` remains **unexplained**. Neither "compressed" nor "not compressed" is established,
+and the field may not be a compression flag at all.
+
+### The decompressor is NOT in the boot ELF
+
+#31's Attack A step 4 — *"find the decompressor in the ELF: search for the string `FILEDATA` and
+the magic `0x82734927`, then follow the loader"* — is itself blocked, and cheaply disproved:
+
+- The string `FILEDATA` appears **0 times** in `SLUS_209.79` (3,214,528 bytes, whole file).
+- The magic `0x82734927` appears **0 times** as a 32-bit literal.
+- Its halves (`0x8273` hi, `0x4927` lo) occur 2 and 8 times respectively, forming **0**
+  `lui`/`ori`-shaped pairs within 8 bytes of each other.
+
+The archive loader therefore lives in an overlay streamed from the disc, not in the boot
+executable — which is the S3 lesson recorded in #30 verbatim: *"Exhaustive PT_LOAD search found
+nothing ≠ absent… it lived in a streaming battle overlay ~1 GB into the disc."*
+
+### Resolved: the 15 "archives that don't parse"
+
+They parse fine. All 15 are **legitimately empty archives**: `total = 2048` (one header sector),
+entry count 0, every row zero. Not a variant layout. `build_s4_subfile_index.py` now returns an
+empty entry list for them rather than reporting a failure.
+
+### Search parameters, so none of this is repeated
+
+NTSC-U disc only. Whole-population sweep of both BI1 and BI2. Entropy computed over the first
+65,536 bytes of each payload where longer. Codecs tried: zlib, raw deflate, LZMA, LZARI (skips
+0/4/8/16). ELF search was the full 3,214,528 bytes for the literal, the string, and lui/ori
+pairs. **Not** tried: LZSS variants other than LZARI, LZ77 with a 4 KB ring buffer, Sony
+DECOMP/ICE, and any per-entry 16-byte header interpretation of the +16 rule.
