@@ -243,3 +243,18 @@ button.picker.dirty { color:var(--warn); border-color:var(--warnbd); background-
 .isotoggle.has-dirty .revert,
 .row.has-dirty > .revert,
 .ratefield.has-dirty .revert { display:inline-flex; }
+   collapsed warning is still warn-coloured and a collapsed caption still reads as muted —
+   only the flow changes. The summary is inline so the button follows it on the same line
+   like a "…more"; the expanded body is a block (some of these hold <p> and <ul> children),
+   so there the button drops beneath it. */
+.blurb-sum { display:inline; }
+.blurb-full { display:block; }
+/* The `hidden` attribute has to beat the two rules above — a UA `[hidden]` rule does not,
+   since a class selector outranks it. Both halves stay in the DOM either way: textContent
+   and the browser's own find-in-page still reach the full text. */
+.blurb-sum[hidden], .blurb-full[hidden] { display:none; }
+.blurb-tog { background:none; border:0; padding:0; margin:0 0 0 6px; font:inherit; font-size:12px;
+  color:var(--acc2); cursor:pointer; white-space:nowrap; }
+.blurb-tog:hover { text-decoration:underline; }
+.blurb-tog:focus-visible { outline:2px solid var(--focusring); outline-offset:2px; border-radius:3px; }
+.blurb.open > .blurb-tog { display:inline-block; margin:4px 0 0; }

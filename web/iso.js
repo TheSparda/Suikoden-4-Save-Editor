@@ -27,6 +27,7 @@
       slider: [5, 300, 5],
       hint: "How often random battles happen, as a percent of the stock rate. The game rolls the " +
             "encounter threshold as rand(0..N-1); this sets N = round(10000 / percent). Lower = fewer.",
+      hintSum: "How often random battles happen, as a percent of the stock rate. Lower = fewer.",
       sig: (b) => b[2] === 0x04 && b[3] === 0x24,     // addiu a0, zero, imm
       read: (dv) => { const N = dv.getUint16(0, true); return N ? Math.round(10000 / N) : 100; },
       write: (dv, pct) => {
@@ -40,6 +41,7 @@
       sub: "Skip battles against enemies weaker than your party, for the whole party, without " +
            "equipping the rune. Strong parties get near-total peace; weaker parties still fight. " +
            "This is the game's own Champion's Rune behaviour — softer than turning battles off.",
+      subSum: "Skip battles against enemies weaker than your party, without equipping the rune.",
       off: 0x10E610, len: 4,
       onBytes: [0x00, 0x00, 0x00, 0x00],             // nop the "does anyone have the Champion's Rune?" branch
       offBytes: [0x09, 0x00, 0x80, 0x12],            // beqz s4, 0x2D5E38 (stock)
@@ -55,6 +57,7 @@
            "battles with weaker enemies. For fewer (not zero) battles, lower the rate instead; for " +
            "the Champion's Rune's selective effect, equip it in the Save Editor. Scripted story " +
            "fights still happen.",
+      subSum: "No random encounters anywhere — stronger than the Champion's Rune. Story fights still happen.",
       off: 0x10E484, len: 4,
       onBytes: [0x00, 0x00, 0x02, 0x24],              // li v0, 0  (force gate = no encounter)
       offBytes: [0x5C, 0x57, 0x0B, 0x0C],             // jal 0x2D5D70 (stock)
@@ -348,7 +351,7 @@
     const w = win(f.key); const cur = f.read(w.dv);
     if (f.type === "bool") {
       return `<label class="isotoggle${isDirty(f.key) ? " has-dirty" : ""}"><input type="checkbox" data-iso="${f.key}" ${cur ? "checked" : ""}${isDirty(f.key) ? ' class="dirty"' : ""}>
-          <span class="isotxt"><b>${esc(f.label)}</b>${revBtn(f)}${f.sub ? `<span class="isosub">${esc(f.sub)}</span>` : ""}</span></label>`;
+          <span class="isotxt"><b>${esc(f.label)}</b>${revBtn(f)}${f.sub ? `<span class="isosub" data-sum="${esc(f.subSum || "")}">${esc(f.sub)}</span>` : ""}</span></label>`;
     }
     const presets = (f.presets || []).map(([lbl, v]) =>
       `<button type="button" class="chip mini" data-preset="${f.key}" data-pv="${v}"${v === cur ? ' aria-pressed="true"' : ""}>${esc(lbl)}</button>`).join("");
@@ -362,7 +365,7 @@
           <input type="number" min="${f.min || 0}" max="${f.max || 999999}" value="${cur}" data-iso="${f.key}" data-def="${cur}" class="rateinput${isDirty(f.key) ? " dirty" : ""}">
           <span class="ratetag" data-ratetag="${f.key}">${esc(rateTag(cur))}</span>
         </div>
-        ${f.hint ? `<div class="fnote ratefnote">${esc(f.hint)}</div>` : ""}</div>`;
+        ${f.hint ? `<div class="fnote ratefnote" data-sum="${esc(f.hintSum || "")}">${esc(f.hint)}</div>` : ""}</div>`;
   }
   // friendly readout of a percent, e.g. 50 -> "≈ ½× the battles", 200 -> "≈ 2× the battles"
   function rateTag(p) {

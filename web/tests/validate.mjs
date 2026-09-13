@@ -127,6 +127,9 @@ const isoOffs = [...iso.matchAll(/off:\s*(0x[0-9A-Fa-f]+)/g)].map((m) => parseIn
 const coreTag = html.indexOf('src="s4-core.js"'), appTag = html.indexOf('src="app.js"');
 (coreTag >= 0 && appTag >= 0 && coreTag < appTag ? ok : bad)("index.html loads s4-core.js before app.js");
 (/s4-core\.js/.test(sw) ? ok : bad)("service worker precaches s4-core.js");
+(/blurb-core\.js/.test(sw) ? ok : bad)("service worker precaches blurb-core.js");
+{ const bIdx = html.indexOf('src="blurb-core.js"'); 
+  (bIdx >= 0 ? ok : bad)("index.html loads blurb-core.js"); }
 
 // 7b) ISO tab shell (#5). iso.js is an IIFE that touches window on load, so it can't be imported
 // here — these are source-level checks until it grows its own *-core module. The invariant that

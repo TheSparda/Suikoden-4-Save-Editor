@@ -31,7 +31,7 @@
   <div id="updateBanner" class="updatebanner hidden"></div>
 
   <section id="mode-save" class="mode">
-    <p class="sub">Full save editor — recruitment, level/EXP, stats, HP, runes, unite attacks,
+    <p class="sub" data-sum="Full save editor — everything runs in your browser; your save never leaves the device.">Full save editor — recruitment, level/EXP, stats, HP, runes, unite attacks,
       equipment, names, Potch and more. Everything runs in your browser via Python (Pyodide);
       your save <b>never leaves the device</b>. Works on desktop and Android. A backup is always wise.</p>
 
@@ -53,7 +53,7 @@
   </section>
 
   <section id="mode-iso" class="mode hidden">
-    <p class="sub">Edit the game disc directly — encounter rate and other code tweaks — written
+    <p class="sub" data-sum="Edit the disc directly — written in place on desktop, streamed as a patched copy on Android. NTSC-U only.">Edit the game disc directly — encounter rate and other code tweaks — written
       <b>in place</b> on desktop Chrome/Edge/Brave/Opera, or <b>streamed as a patched copy</b> to
       your downloads on Android Chrome/Firefox. Nothing is uploaded; only tiny byte-runs change.
       NTSC-U (SLUS-209.79) only. Back up first.</p>
@@ -61,7 +61,7 @@
   </section>
 
   <section id="mode-ref" class="mode hidden">
-    <p class="sub">Browse the verified reference tables — all 113 characters, 519 items, and 42
+    <p class="sub" data-sum="Browse the verified reference tables.">Browse the verified reference tables — all 113 characters, 519 items, and 42
       runes with their in-game ids.</p>
     <div id="refRoot"></div>
   </section>
@@ -82,6 +82,7 @@
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
 <!-- s4-core.js first: it defines the rules app.js reads as globals. -->
 <script src="s4-core.js"></script>
+<script src="blurb-core.js"></script>
 <script src="app.js"></script>
 <script src="iso.js"></script>
 </body>
