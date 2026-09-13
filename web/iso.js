@@ -13,6 +13,30 @@
 (function () {
   "use strict";
 
+  // ---- regions (#18) -------------------------------------------------------
+  //
+  // SYSTEM.CNF at LBA 366 names the boot ELF, which identifies the release. Reading it means a
+  // PAL disc can be recognised and SAID SO, instead of being rejected as "not Suikoden IV" —
+  // which is what every PAL user hit, having just had their save edited successfully.
+  //
+  // Per-field offsets are keyed by region. A field with no offset for the loaded region is
+  // HIDDEN WITH A REASON rather than guessed at: the patch shapes are known, so PAL offsets are
+  // a pattern search away, but a wrong offset writes into unrelated code (rule 1).
+  const SYSTEM_CNF_LBA = 366;
+  const REGIONS = {
+    "SLUS-209.79": { label: "NTSC-U", elfLba: 367, elfLen: 3214528 },
+    "SLES-529.13": { label: "PAL", elfLba: null, elfLen: null },
+  };
+  let REGION = "SLUS-209.79";                  // set from the disc on load
+
+  // A field's offset for the loaded region, or null when it hasn't been located there.
+  // `off` may be a number (NTSC-U only, the historical form) or a per-region map.
+  const offFor = (f, region) =>
+    (typeof f.off === "number" ? (region === "SLUS-209.79" ? f.off : null)
+                               : (f.off[region] != null ? f.off[region] : null));
+  const availableFields = (region) => FIELDS.filter((f) => offFor(f, region || REGION) != null);
+  const unavailableFields = (region) => FIELDS.filter((f) => offFor(f, region || REGION) == null);
+
   const ISO_ELF_START = 367 * 2048;          // boot ELF SLUS_209.79;1 at LBA 367 (0xB7800)
 
   // ---- editable fields (absolute ISO byte offsets; verified on the USA disc) ----
@@ -150,21 +174,61 @@
   }
   async function loadInput(file) { return commitIso(file, null); }
 
+  async function detectRegion(file) {
+    try {
+      const cnf = new TextDecoder().decode(await file.slice(SYSTEM_CNF_LBA * 2048, SYSTEM_CNF_LBA * 2048 + 128).arrayBuffer());
+      const m = /BOOT2\s*=\s*cdrom0:\\([A-Z]{4})_(\d{3})\.(\d{2})/i.exec(cnf);
+      if (!m) return null;
+      return `${m[1].toUpperCase()}-${m[2]}.${m[3]}`;
+    } catch (e) { return null; }
+  }
+
+  // Any path that declines to load must also clear what the PREVIOUS disc left on screen —
+  // otherwise the old disc's fields stay visible and editable under a message saying this one
+  // can't be edited, which is the worst of both.
+  // #isoStatus lives inside #isoEditor, so a message printed after clearIso() would have nowhere
+  // to render. Anything explaining why a disc was declined goes to the loader message instead,
+  // which sits in the (always-present) loader card.
+  const declineMsg = (m) => { setBoot(m, true); setStatus(m, "err"); };
+
+  function clearIso() {
+    WINDOWS = {}; isoHandle = null; isoFile = null;
+    ELF = null; TEXTS = null; TEXT_EDITS = {};
+    JOURNAL.reset();
+    const ed = $("#isoEditor"); if (ed) ed.innerHTML = "";
+  }
+
   async function commitIso(file, handle) {
     setStatus("Reading disc region…", "");
-    const maxOff = FIELDS.reduce((a, f) => Math.max(a, f.off + f.len), 0);
-    if (file.size < maxOff) return setStatus(`That file is only ${fmtSize(file.size)} — not a full Suikoden IV ISO.`, "err");
+    const serial = await detectRegion(file);
+    if (serial && !REGIONS[serial]) {
+      clearIso();
+      return declineMsg(`That disc is ${serial}, which isn't a Suikoden IV release this editor knows. ` +
+        `Supported: ${Object.entries(REGIONS).map(([k, v]) => `${k} (${v.label})`).join(", ")}.`);
+    }
+    REGION = serial || "SLUS-209.79";
+    const usable = availableFields(REGION);
+    if (!usable.length) {
+      clearIso();
+      return declineMsg(`This is the ${REGIONS[REGION].label} release (${REGION}). Its save files are ` +
+        `fully supported — but no disc offsets have been located for it yet, so there is nothing ` +
+        `to edit here. See issue #18.`);
+    }
+    const maxOff = usable.reduce((a, f) => Math.max(a, offFor(f, REGION) + f.len), 0);
+    if (file.size < maxOff) { clearIso(); return declineMsg(`That file is only ${fmtSize(file.size)} — not a full Suikoden IV ISO.`); }
     const wins = {};
-    for (const f of FIELDS) {
+    for (const f of usable) {
+      const fo = offFor(f, REGION);
       let bytes;
-      try { bytes = new Uint8Array(await file.slice(f.off, f.off + f.len).arrayBuffer()); }
+      try { bytes = new Uint8Array(await file.slice(fo, fo + f.len).arrayBuffer()); }
       catch (e) { return setStatus("Read failed: " + e.message, "err"); }
       if (bytes.length !== f.len) return setStatus("Could not read the disc region (file too short).", "err");
       if (f.sig && !f.sig(bytes)) {
-        return setStatus(`This doesn't look like the NTSC-U (SLUS-209.79) Suikoden IV ISO ` +
-          `(unexpected bytes at 0x${f.off.toString(16).toUpperCase()}). PAL/other builds aren't supported here.`, "err");
+        clearIso();
+        return declineMsg(`This doesn't look like the ${REGIONS[REGION].label} (${REGION}) Suikoden IV ISO ` +
+          `— unexpected bytes at 0x${fo.toString(16).toUpperCase()}. It may be a different revision.`);
       }
-      wins[f.key] = { off: f.off, len: f.len, buf: bytes, orig: bytes.slice(), dv: new DataView(bytes.buffer), odv: new DataView(bytes.slice().buffer) };
+      wins[f.key] = { off: fo, len: f.len, buf: bytes, orig: bytes.slice(), dv: new DataView(bytes.buffer), odv: new DataView(bytes.slice().buffer) };
     }
     WINDOWS = wins; isoHandle = handle; isoFile = file; isoName = file.name || "Suikoden IV.iso";
     JOURNAL.reset();                      // a newly opened disc has no history to unwind
@@ -172,7 +236,9 @@
     saveNudged = false;
     if (handle) idbSet("lastIso", { name: isoName, handle, at: Date.now() }).catch(() => {});
     render();
-    setStatus(`Loaded ${isoName} — NTSC-U verified.`, "ok");
+    const hidden = unavailableFields(REGION);
+    setStatus(`Loaded ${isoName} — ${REGIONS[REGION].label} (${REGION}) verified.`
+      + (hidden.length ? ` ${hidden.length} field${hidden.length === 1 ? "" : " is"} unavailable on this release.` : ""), "ok");
   }
 
   function saveMode() {
@@ -318,7 +384,7 @@
     const host = $("#isoViewHost");
     host.innerHTML = "";
     v[2](host);
-    FIELDS.forEach(wireField);   // no-ops for fields the active tab didn't render
+    availableFields().forEach(wireField);   // no-ops for fields the active tab didn't render
     $$("[data-isorevert]").forEach((b) => (b.onclick = (e) => {
       e.preventDefault(); e.stopPropagation();   // the ↺ sits inside a <label> — don't toggle it
       revertField(b.dataset.isorevert);
@@ -334,7 +400,7 @@
   function refreshViewTabs() {
     const host = $("#isoViews"); if (!host) return;
     host.innerHTML = VIEWS.map(([k, label]) => {
-      const n = FIELDS.filter((f) => f.view === k && isDirty(f.key)).length;
+      const n = availableFields().filter((f) => f.view === k && isDirty(f.key)).length;
       return `<button class="chip${k === VIEW ? " on" : ""}" data-view="${k}" aria-pressed="${k === VIEW}"`
         + `>${esc(label)}${n ? ` <span class="pill on" title="${n} staged edit${n === 1 ? "" : "s"}">${n}</span>` : ""}</button>`;
     }).join("");
@@ -354,12 +420,17 @@
   // Every edit is capped to the run's original byte length. Growing a string would mean
   // repointing every reference to it, which this editor cannot do, so a longer value is refused
   // rather than truncated.
-  const ELF_OFF = 367 * 2048, ELF_LEN = 3214528;
   let ELF = null, TEXTS = null, TEXT_EDITS = {};   // off -> string
+  // The boot ELF's position is part of the release, so it comes from the region table.
+  const elfOff = () => (REGIONS[REGION].elfLba || 0) * 2048;
+  const elfLen = () => REGIONS[REGION].elfLen || 0;
+  let ELF_OFF = 367 * 2048;
 
   async function loadElf() {
     if (ELF || !isoFile) return ELF;
-    ELF = new Uint8Array(await isoFile.slice(ELF_OFF, ELF_OFF + ELF_LEN).arrayBuffer());
+    if (!elfLen()) throw new Error(`The boot ELF hasn't been located for ${REGIONS[REGION].label} (${REGION}) — see issue #18.`);
+    ELF_OFF = elfOff();
+    ELF = new Uint8Array(await isoFile.slice(ELF_OFF, ELF_OFF + elfLen()).arrayBuffer());
     TEXTS = TextCore.scanStrings(ELF, ELF_OFF);
     return ELF;
   }
@@ -438,7 +509,7 @@
   }
 
   function drawChanges(host) {
-    const rows = FIELDS.map((f) => ({ f, ...discState(f) }));
+    const rows = availableFields().map((f) => ({ f, ...discState(f) }));
     const nonStock = rows.filter((r) => r.state === "patched" || r.state === "unrecognised");
     const hexOf = (a) => [...a].map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" ");
 
@@ -513,14 +584,21 @@
 
   function drawEncounters(host) {
     const groups = {};
-    FIELDS.filter((f) => f.view === "encounter").forEach((f) => (groups[f.group] = groups[f.group] || []).push(f));
+    availableFields().filter((f) => f.view === "encounter").forEach((f) => (groups[f.group] = groups[f.group] || []).push(f));
+    const hidden = unavailableFields().filter((f) => f.view === "encounter");
     host.innerHTML = Object.entries(groups).map(([g, fs]) => {
       const vals = fs.filter((f) => f.type !== "bool"), bools = fs.filter((f) => f.type === "bool");
       return `<div class="card"><h3 class="sec">${esc(g)}</h3>
         ${vals.length ? `<div class="isovals">${vals.map(fieldHtml).join("")}</div>` : ""}
         ${bools.length ? `<div class="isotoggles">${bools.map(fieldHtml).join("")}</div>` : ""}
       </div>`;
-    }).join("");
+    }).join("")
+    // Hidden, with the reason — not silently missing. A user on a release we haven't mapped
+    // should be told that, and told it is a gap rather than a decision.
+    + (hidden.length ? `<div class="card"><h3 class="sec">Not available on this release</h3>
+        <p class="muted">${hidden.map((f) => esc(f.label)).join(", ")} — the offsets for
+        ${esc(REGIONS[REGION].label)} (${esc(REGION)}) haven't been located yet. The patch shapes are
+        known, so this is a pattern search rather than fresh reverse engineering; see issue #18.</p></div>` : "");
   }
 
   const revBtn = (f) =>
@@ -651,7 +729,7 @@
 
   function reviewRows() {
     const rows = [];
-    for (const f of FIELDS) {
+    for (const f of availableFields()) {
       if (!isDirty(f.key)) continue;
       const w = win(f.key);
       const ov = f.read(new DataView(w.orig.buffer)), nv = f.read(w.dv);
