@@ -359,3 +359,88 @@ The earlier STATUS line names two unknowns — the codec and the content map —
 whole thing as "big effort". Re-reading it: the outer directory is solved (#44), the codec is
 probably a misreading rather than a hard problem (#46), the entry semantics are a bounded format
 question (#45), and only the content map (#47) is genuinely open.
+
+---
+
+## 2026-09-12 — the pnach maps into the save block, and it says CHAR_BASE/CHAR_STRIDE is wrong
+
+`Cheats/Suikoden IV (NTSC-U).pnach` (588 KB, 5,496 `patch=` lines) had never been examined. It
+is a large, **named** evidence source: 5,171 of its sections touch the save block, 5,314 patch
+lines land inside `0x532860 .. +0xE260`, and the section names give every field a label for all
+113 characters (`[Adrienne Codes\Max HP]`, `[Hero Codes\Head Rune Modifier]`, …).
+
+The mapping is the one already proven here: `save_offset = ram_addr - 0x532860`. Confirmation is
+immediate — the very first patch line, `[0:00:00 Game Time] patch=1,EE,20532880,…`, is
+`0x532880 - 0x532860 = 0x20`, the known game-time offset. (The leading nibble is the PS2 code
+type, not part of the address.)
+
+### What it says the layout is
+
+Sorting each character's `Max HP` code by address gives **113 records at stride 0x78**, first at
+save `+0x126`. Taking the equipment block at `+0xC0` as the record base, the named fields land:
+
+| Offset | Field (pnach's own name) |
+|---|---|
+| +0x00 … +0x0C | Head, Body, Hands, Feet, Other 1–3 (u16 each) |
+| +0x10 / +0x11 / +0x12 | Head / Right / Left rune (u8 each) |
+| +0x48 | Max EXP (u32) |
+| +0x4C | Max Weapon LVL |
+| +0x4E / +0x50 | Max ATK / Max DEF |
+| +0x52 | Infinite HP (current HP) |
+| +0x66 | Max HP |
+| +0x68 … +0x76 | STR SKL MAG EVA PDF MDF SPD LUC |
+| +0x8B … +0x98 | element equipped, rune pieces ×5, rune LVs |
+
+Those are **the same two base pointers this document already records under the RAM layout**
+(`FirstPartyItem` = `0x532920` → save `+0xC0`; `FirstPartyExp` = `0x532968` → save `+0x108`).
+Since the save body is a verbatim image of that RAM block, the RAM layout *is* the save layout —
+which this document had explicitly warned against assuming.
+
+### The part that is a live bug
+
+`s4save.py` uses `CHAR_BASE = 0x1E4`, `CHAR_STRIDE = 0xF0`, `OFF_MAXHP = 0x92`, `OFF_STATS = 0x94`.
+Note it *already* uses `PROG_BASE = 0x108`, `PROG_STRIDE = 0x78` for EXP and weapon level, and the
+pnach agrees with those exactly (`+0x00` EXP, `+0x04` weapon Lv). The disagreement is only about
+Max HP and the eight stats.
+
+Checked against two real CodeBreaker saves (11251, 11240):
+
+- **Every** engine Max HP read aliases into another character's progression record.
+  `0x1E4 + i*0xF0 + 0x92` is `0x108 + j*0x78 + 0x06` for **55/55** in-range `i` — offset `0x06` is
+  the ATK field. The values are byte-identical by construction, in both saves.
+- **`SKL == MAG` on 111 of 112 populated records** under the engine's reading — the signature of
+  a window straddling a record boundary, not a real stat block. Under `PROG + 0x20` it is 4/61.
+- `PROG + 0x0A` equals `PROG + 0x0C` on **61/61** records, consistent with current HP == Max HP
+  for a save written outside battle. (This also corrects the note elsewhere in this file that
+  current HP "reads 0 when saved out of battle" — it reads full.)
+- Hero's `PROG` record decodes coherently end to end: EXP 98999, weapon Lv 15, ATK 437, DEF 288,
+  curHP 608, maxHP 608, a stat block, maxHP again, a second stat block (base vs equipment-modified).
+
+Consequence: **editing Max HP or any stat writes into a different character's record.** That is
+data corruption, not a display error.
+
+### What is NOT established
+
+The rune and equipment offsets are a separate question and the evidence does **not** condemn them.
+The existing anchors hold and the pnach-derived reading does not:
+
+- Engine, both saves: Hero slot 1 = Rune Of Punishment, Ted slot 1 = Soul Eater — stable and correct.
+- Pnach reading, same saves: Hero = [Sunbeam, Lightning, Rune Of Punishment]; Ted = [Fire, Soul
+  Eater, Water] in one save and [Nothing, Nothing, Water] in the other. Ted without Soul Eater is
+  wrong, so that reading is not simply correct either.
+- The id-membership test does not discriminate equipment: engine 201/201 and pnach 192/192 valid
+  item ids. It *does* discriminate runes — engine 45/98 (45.9%), pnach 114/114 — but the anchor
+  test outranks it, so this is recorded as unresolved rather than decided.
+
+**Search parameters, so this is not repeated:** two CodeBreaker saves from one playthrough
+(11251, 11240) and the NTSC-U pnach only. No PAL save, no controlled pair, no in-game check. The
+third sample (`suikoden-iv.6026.cbs`) failed to yield a payload and was skipped rather than
+worked around.
+
+### What would finish it
+
+A single in-game check settles the whole thing in minutes: note one character's Max HP and STR on
+screen, save, and read both candidate offsets. Deliberately **not** guessed at here — rewriting
+the character-record decoder is the most dangerous change available in this repo, and a partial
+fix that corrects Max HP while leaving runes on a frame that may also be wrong could make things
+worse than the present state. Tracked as a bug issue with this evidence attached.
