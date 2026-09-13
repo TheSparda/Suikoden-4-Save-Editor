@@ -53,9 +53,9 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
 
 // ---- Pyodide bootstrap -----------------------------------------------------
 async function bootPyodide() {
-  bootProgress(10, "Downloading Python runtime…");
+  bootProgress(10, "Downloading Python runtime…", "rt");
   const py = await loadPyodide();
-  bootProgress(55, "Loading save module…");
+  bootProgress(55, "Loading save module…", "mod");
   const grab = async (url) => {
     const r = await fetch(url);
     if (!r.ok) throw new Error(`fetch ${url} (${r.status})`);
@@ -67,7 +67,7 @@ async function bootPyodide() {
   for (const j of ["s4_item_names.json", "s4_rune_names.json", "s4_char_offsets.json", "s4_unites.json"]) {
     py.FS.writeFile(j, await (await grab(`${EDITOR_DIR}/${j}`)).text());
   }
-  bootProgress(80, "Parsing reference tables…");
+  bootProgress(80, "Parsing reference tables…", "ref");
 
   py.runPython(`
 import json, os, sys
@@ -111,7 +111,7 @@ def load_reference():
   try { const a = await (await fetch(`${EDITOR_DIR}/s4_affinities.json`)).json(); delete a._note; AFF = a; }
   catch (e) { AFF = {}; }
   PY = py;
-  bootProgress(100, "Ready");
+  bootProgress(100, "Ready", "done");
   return py;
 }
 // character name → affinity ratings, or null — the rule is in s4-core.js; app.js owns the table.
@@ -864,11 +864,76 @@ function renderRefTable() {
 // ---- misc ------------------------------------------------------------------
 function setStatus(msg, kind) { const el = $("#status"); if (el) { el.textContent = msg; el.className = "status" + (kind ? " " + kind : ""); } }
 function setDropMsg(msg, isErr) { const el = $("#engineStatus"); if (el) el.innerHTML = (isErr ? "⚠ " : "") + esc(msg); }
-function bootProgress(pct, msg) {
+function bootProgress(pct, msg, step) {
+  bootGate.step(pct, msg, step);
   const el = $("#engineStatus"); if (!el) return;
   el.innerHTML = `<div class="bootmsg">${pct < 100 ? '<span class="spinner"></span>' : ""}${esc(msg)}</div>` +
     `<div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>`;
 }
+
+// Boot gate (#7). The overlay itself is in index.html so it paints on the first frame; this only
+// drives it. It covers #loaderCard alone — Python gates loading a save and nothing else, so the
+// ISO editor (a completely Pyodide-free code path) stays usable during the ~10 MB download, and
+// the gate says so with a button rather than leaving the working half of the app looking broken.
+const bootGate = (() => {
+  const STEPS = ["rt", "mod", "ref"];
+  let closed = false, failed = false;
+  const ov = () => document.getElementById("bootOv");
+  return {
+    // pct/msg mirror bootProgress; step is the STEPS key now running ("done" = all finished).
+    step(pct, msg, step) {
+      // Sticky once failed: a late progress call overwriting the error with "Ready" would tell
+      // the user the engine started when it didn't.
+      const o = ov(); if (!o || closed || failed) return;
+      const fill = o.querySelector("#bootFill"), m = o.querySelector("#bootMsg");
+      if (fill) fill.style.width = Math.max(2, Math.min(100, pct)) + "%";
+      if (m) { m.className = "boot-msg"; m.innerHTML = `<span class="spinner"></span>${esc(msg)}`; }
+      if (!step) return;
+      const at = STEPS.indexOf(step);   // -1 for "done" → everything ticks
+      STEPS.forEach((k, i) => {
+        const li = o.querySelector(`.boot-steps li[data-step="${k}"]`); if (!li) return;
+        li.classList.toggle("on", i === at);
+        li.classList.toggle("done", at < 0 || i < at);
+      });
+    },
+    // Engine failed: keep the gate up (the loader under it can't do anything anyway) but swap the
+    // spinner for the reason and the two things that actually help — a retry and a cache clear,
+    // since a half-written service-worker cache is the usual culprit.
+    fail(msg) {
+      const o = ov(); if (!o || closed) return;
+      failed = true;
+      const m = o.querySelector("#bootMsg"), bar = o.querySelector(".bar"), acts = o.querySelector("#bootActs");
+      const t = o.querySelector("#bootTitle");
+      if (t) t.textContent = "The Python engine didn’t start";
+      if (m) { m.className = "boot-msg err"; m.textContent = "⚠ " + msg; }
+      if (bar) bar.querySelector(".bar-fill").classList.add("err");
+      // The step that was mid-flight is the one that failed — a spinning glyph next to
+      // "didn't start" reads as still-working, which is the opposite of the truth.
+      const at = o.querySelector(".boot-steps li.on");
+      if (at) { at.classList.remove("on"); at.classList.add("bad"); }
+      m?.setAttribute("aria-busy", "false");
+      if (acts && !document.getElementById("bootRetry")) {
+        acts.insertAdjacentHTML("afterbegin",
+          '<button type="button" class="chip" id="bootRetry">↻ Retry</button>' +
+          '<button type="button" class="chip" id="bootNuke">Clear cache &amp; reload</button>');
+        document.getElementById("bootRetry").onclick = () => location.reload();
+        document.getElementById("bootNuke").onclick = () => forceRefresh();
+      }
+      const hide = document.getElementById("bootHide");
+      if (hide) hide.textContent = "Dismiss anyway";
+    },
+    close() {
+      const o = ov(); if (!o || closed) return;
+      closed = true;
+      o.classList.add("gone");
+      // Removed rather than left as an invisible layer over the loader — and so the phone
+      // min-height that keeps the card gate-sized goes with it.
+      setTimeout(() => o.remove(), 260);
+    },
+    get closed() { return closed; },
+    get failed() { return failed; },
+  };
+})();
 function dirtyNow() { try { return typeof CE !== "undefined" && buildDiff().length > 0; } catch (e) { return false; } }
 
 // ---- PWA staleness escape hatch (B17) --------------------------------------
@@ -949,6 +1014,10 @@ window.addEventListener("DOMContentLoaded", () => {
   applyTheme(theme);
   bindUndoKeys();
   bindReverts();
+  // The gate's whole point: the ISO editor needs no Python, so offer it instead of making the
+  // user wait, and let them dismiss the gate to read the loader underneath.
+  const bootIso = $("#bootIso"); if (bootIso) bootIso.onclick = () => { bootGate.close(); setMode("iso"); };
+  const bootHide = $("#bootHide"); if (bootHide) bootHide.onclick = () => bootGate.close();
   // Show the version of the *running* code (app.js), not whatever index.html shipped — so a
   // transient cache desync can never make the footer disagree with the update banner.
   const cr = $("footer .credit"); if (cr) cr.innerHTML = cr.innerHTML.replace(/·\s*v[\d.]+/, "· v" + APP_VERSION);
@@ -979,8 +1048,9 @@ window.addEventListener("DOMContentLoaded", () => {
   pyReady.then(() => {
     setDropMsg("Python engine ready — load a save file.", false);
     pickBtn.disabled = false;
+    bootGate.close();
     if (!$("#mode-ref").classList.contains("hidden") && !refRendered) renderReference();
-  }).catch((e) => { setDropMsg("Engine failed to start: " + e.message, true); });
+  }).catch((e) => { setDropMsg("Engine failed to start: " + e.message, true); bootGate.fail(e.message); });
   pyReady.then(async () => {
     const shared = await pickupSharedFile();
     if (!shared) showRecent();

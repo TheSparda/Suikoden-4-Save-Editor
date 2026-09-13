@@ -258,3 +258,38 @@ button.picker.dirty { color:var(--warn); border-color:var(--warnbd); background-
 .blurb-tog:hover { text-decoration:underline; }
 .blurb-tog:focus-visible { outline:2px solid var(--focusring); outline-offset:2px; border-radius:3px; }
 .blurb.open > .blurb-tog { display:inline-block; margin:4px 0 0; }
+
+/* Boot gate (#7) — ported from the Suikoden III editor. It scopes itself to #loaderCard, which
+   needs to be a positioning context for that to work. */
+#loaderCard { position:relative; }
+/* On a phone the step notes wrap and the two chips stack, so the gate is taller than the drop
+   zone it covers — without this it would scroll inside a card that has room to just be taller. */
+@media (max-width:430px) { #loaderCard:has(#bootOv) { min-height:470px; } }
+.boot-ov { position:absolute; inset:0; z-index:20; display:flex; align-items:center; justify-content:center;
+  padding:12px; overflow:auto; border-radius:inherit;
+  background:color-mix(in srgb,var(--bg) 88%,transparent); opacity:1; transition:opacity .22s ease; }
+@supports (backdrop-filter:blur(2px)) { .boot-ov { backdrop-filter:blur(3px); } }
+.boot-ov.gone { opacity:0; pointer-events:none; }
+.boot-card { background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow);
+  padding:20px; width:100%; max-width:430px; }
+.boot-card:focus { outline:0; }
+.boot-card h2 { margin:0 0 10px; font-family:var(--titlefont); color:var(--acc2); font-size:16px;
+  text-transform:none; letter-spacing:0; }
+.boot-msg { color:var(--mut); font-size:13px; margin-bottom:12px; }
+.boot-msg.err { color:var(--warn); }
+.boot-card .bar { max-width:none; height:6px; margin:0; }
+.boot-steps { list-style:none; margin:14px 0 0; padding:0; font-size:12px; color:var(--mut); }
+.boot-steps li { position:relative; padding:4px 0 4px 20px; }
+.boot-steps li::before { content:"○"; position:absolute; left:2px; opacity:.6; }
+.boot-steps li.on { color:var(--ink); }
+.boot-steps li.on::before { content:"◐"; color:var(--acc); opacity:1; }
+.boot-steps li.done::before { content:"✓"; color:var(--acc2); opacity:1; }
+.boot-steps li.bad { color:var(--ink); }
+.boot-steps li.bad::before { content:"✗"; color:var(--crimson); opacity:1; }
+.boot-steps .bs-note { color:var(--mut); opacity:.8; }
+.boot-steps li.on .bs-note { opacity:.9; }
+.boot-note { margin-top:12px; font-size:11px; color:var(--mut); opacity:.85; line-height:1.3; }
+.boot-acts { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+.boot-acts button { flex:1 1 auto; }
+.bar-fill.err { background:var(--crimson); }
+@media (prefers-reduced-motion:reduce) { .boot-ov { transition:none; } }

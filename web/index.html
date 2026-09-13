@@ -36,6 +36,28 @@
       your save <b>never leaves the device</b>. Works on desktop and Android. A backup is always wise.</p>
 
     <div class="card" id="loaderCard">
+      <!-- Boot gate (#7). Lives in the markup, not in app.js, so it paints on the first frame
+           rather than after a ~10 MB download has already started. It covers ONLY this card:
+           Python gates loading a save and nothing else, so the mode tabs, theme buttons and the
+           entire ISO editor stay live underneath it. -->
+      <div id="bootOv" class="boot-ov" role="group" aria-labelledby="bootTitle">
+        <div class="boot-card" id="bootCard" tabindex="-1">
+          <h2 id="bootTitle">Starting the Python engine</h2>
+          <div class="boot-msg" id="bootMsg" aria-live="polite" aria-busy="true">
+            <span class="spinner"></span>Downloading Python runtime…</div>
+          <div class="bar"><div class="bar-fill" id="bootFill" style="width:6%"></div></div>
+          <ol class="boot-steps" id="bootSteps">
+            <li data-step="rt">Python runtime <span class="bs-note">~10 MB — cached after the first visit</span></li>
+            <li data-step="mod">Save module <span class="bs-note">s4save.py, run on your device</span></li>
+            <li data-step="ref">Reference tables <span class="bs-note">character, item and rune names</span></li>
+          </ol>
+          <div class="boot-note">Nothing is uploaded — the engine and your save stay in this browser.</div>
+          <div class="boot-acts" id="bootActs">
+            <button type="button" class="chip" id="bootIso">ISO Editor → (no Python needed)</button>
+            <button type="button" class="chip" id="bootHide">Dismiss</button>
+          </div>
+        </div>
+      </div>
       <h2>1 · Load save</h2>
       <div class="drop" id="drop">
         <div><b>Drop a PS2 save file here</b> or</div>
