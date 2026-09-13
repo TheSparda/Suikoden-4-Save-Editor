@@ -154,13 +154,22 @@ function modalA11y(ov, closeFn, initial) {
 
 // ---- searchable picker (replaces long native <select>s — the big mobile win) ----
 // list = [{id,name}]; onPick(id) fires on choose; idFmt formats the id prefix per domain.
-function openPicker(title, list, current, onPick, idFmt) {
+// `scope` (optional) narrows the initial list: { label, ids, allLabel }. The full list is always
+// one click away — a picker that hides a valid choice is worse than a long one (#16).
+function openPicker(title, list, current, onPick, idFmt, scope) {
   idFmt = idFmt || ((id) => hx(id, 4));
+  const full = list;
+  if (scope && scope.ids) {
+    const narrowed = full.filter((x) => scope.ids.has(x.id) || x.id === current);
+    if (narrowed.length >= 2) list = narrowed; else scope = null;
+  }
   const ov = document.createElement("div");
   ov.className = "modal-ov";
   ov.innerHTML = `<div class="modal picker-modal" role="dialog" aria-label="${esc(title)}">
       <div class="modal-h"><b>${esc(title)}</b><button class="modal-x" aria-label="close">✕</button></div>
       <input class="picker-search" placeholder="type to filter by name or id…" autocomplete="off">
+      ${scope ? `<div class="picker-scope"><span class="muted">${esc(scope.label)}</span>
+        <button type="button" class="chip mini" id="pkAll">${esc(scope.allLabel || "Show all")}</button></div>` : ""}
       <div class="picker-list"></div></div>`;
   document.body.appendChild(ov);
   const listEl = $(".picker-list", ov), search = $(".picker-search", ov);
@@ -180,6 +189,13 @@ function openPicker(title, list, current, onPick, idFmt) {
   }
   render("");
   search.oninput = () => render(search.value);
+  const allBtn = $("#pkAll", ov);
+  if (allBtn) allBtn.onclick = () => {
+    list = full;
+    $(".picker-scope", ov).remove();
+    render(search.value);
+    search.focus();
+  };
   close = modalA11y(ov, () => ov.remove(), search);
   $(".modal-x", ov).onclick = () => close();
   ov.onclick = (e) => { if (e.target === ov) close(); };
@@ -667,6 +683,12 @@ function charCard(c) {
     <label class="field"><span>EXP${rev("k:exp", ri)}</span>${num("exp", CHAR_CAP.exp)}</label>
     <label class="field"><span>Weapon Lv${rev("k:weaponLvl", ri)}</span>${num("weaponLvl", CHAR_CAP.weaponLvl)}</label>
     <label class="field"><span>Max HP${rev("k:maxHP", ri)}</span>${num("maxHP", CHAR_CAP.maxHP)}</label>`;
+  // Say what is deliberately absent, where someone would look for it (#16). Two of these are
+  // pending issue #48, and claiming otherwise would be worse than the gap.
+  const omissions = `<div class="fnote">Not editable here: <b>current HP</b> — the game restores it
+    on load, so editing it has no effect. <b>Rune uses</b> and <b>rune levels</b> are located but
+    sit in a record whose layout is disputed (issue #48), so they are left alone rather than
+    written on a guess.</div>`;
 
   const stats = STAT_NAMES.map(stat).join("");
 
@@ -709,7 +731,7 @@ function charCard(c) {
         <select data-recruit="${ri}" class="${dz(rcur, c.recruited).trim()}" style="max-width:220px">${recOpts}</select></div>
       <div class="row presets" style="gap:6px;margin:6px 0 2px"><span class="muted">Preset</span>
         <button type="button" class="chip mini" data-preset="${ri}" title="stage max stats, HP, level, weapon Lv and all unites for review">★ Max out</button></div>
-      <h4>Core</h4><div class="grid">${core}</div>
+      <h4>Core</h4><div class="grid">${core}</div>${omissions}
       <h4>Stats</h4><div class="grid">${stats}</div>
       <h4>Runes</h4><div class="grid eq">${runes}</div>
       ${affNote}
@@ -794,13 +816,16 @@ function wireChar(c) {
   // equipment
   $$("button.picker[data-eq]", body).forEach((btn) => (btn.onclick = () => {
     const key = btn.dataset.eq, cur = +btn.dataset.val;
+    const seen = S4Core.slotItemIds(saves[curSlot], key);
+    const scope = seen ? { label: `Showing the ${seen.size} items this save already uses in ${GEAR_LABELS[key] || key}.`,
+                           ids: seen, allLabel: `Show all ${REF.items.length}` } : null;
     openPicker(`Equip — ${GEAR_LABELS[key] || key}`, REF.items, cur, (id) => {
       staged(`${c.name} · ${GEAR_LABELS[key] || key}`, null, () => {
         btn.dataset.val = id; btn.textContent = itemLabel(id);
         btn.classList.toggle("dirty", String(id) !== btn.dataset.def);
         (ce(ri).equip = ce(ri).equip || {})[key] = id;
       });
-    });
+    }, undefined, scope);
   }));
   // unites
   $$("input[data-uri]", body).forEach((inp) => {

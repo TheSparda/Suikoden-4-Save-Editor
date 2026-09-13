@@ -189,6 +189,31 @@
     return { saveEdits, names, charEdits };
   }
 
+  // ---- equipment slot categories (#16) -------------------------------------
+
+  // Which item ids actually appear in a given equipment slot, across the loaded save.
+  //
+  // The picker opens the full 519-item list for every slot, so choosing boots means scrolling
+  // past every sword in the game. A category table would fix that properly, but S4 doesn't have
+  // one: item categories live in FILEDATA (#31), and the "category purity" analysis that located
+  // the slots is expressed in a record frame issue #48 has called into question.
+  //
+  // So this derives the shortlist from the save in front of the user rather than inventing a
+  // taxonomy: these are ids the game itself has placed in this slot on this file. That claim is
+  // verifiable and small; "this is the list of boots" would not be. The caller always keeps a
+  // "show all" escape, and a slot with too few observations returns null so the picker falls back
+  // to the full list rather than hiding real choices behind a shortlist of one (rule 1).
+  const SLOT_SHORTLIST_MIN = 3;
+
+  function slotItemIds(save, slot, { min = SLOT_SHORTLIST_MIN } = {}) {
+    const ids = new Set();
+    for (const c of (save && save.characters) || []) {
+      const v = (c.equip || {})[slot];
+      if (v) ids.add(v);
+    }
+    return ids.size >= min ? ids : null;
+  }
+
   // ---- save health lint (#12) ----------------------------------------------
 
   // A lint over the save PLUS the staged edits, so it catches both damage already in the file and
@@ -539,6 +564,7 @@
     snapshotFromSave, diffSnapshot, SNAPSHOT_FORMAT, SNAPSHOT_VERSION,
     derivePartyState, PARTY_MAX, PARTY_REMOVE_TO, IN_PARTY,
     auditSave, applyFix, STAT_MAX,
+    slotItemIds, SLOT_SHORTLIST_MIN,
   };
   Object.assign(root, API);
   root.S4Core = API;

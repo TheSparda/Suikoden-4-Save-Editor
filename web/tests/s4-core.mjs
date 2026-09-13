@@ -16,7 +16,7 @@ const { REC_STATES, CHAR_CAP, POTCH_MAX, LV_MAX, AFF_RATE, AFF_ALIAS,
         lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal, revertStaged,
         snapshotFromSave, diffSnapshot, SNAPSHOT_FORMAT, SNAPSHOT_VERSION,
         derivePartyState, PARTY_MAX, PARTY_REMOVE_TO, IN_PARTY,
-        auditSave, applyFix, STAT_MAX } = core;
+        auditSave, applyFix, STAT_MAX, slotItemIds, SLOT_SHORTLIST_MIN } = core;
 
 let failures = 0;
 const ok = (m) => console.log("  ✓ " + m);
@@ -229,6 +229,25 @@ console.log("revertStaged — per-field restore:");
   is([o.saveEdits, o.names, o.charEdits], [{}, {}, {}], "reverting every field leaves all three overlays empty");
   is(buildDiff({ save, saveEdits: o.saveEdits, names: o.names, charEdits: o.charEdits }), [],
      "…and buildDiff reports no changes");
+}
+
+// ---- equipment slot shortlist ---------------------------------------------
+console.log("Equipment slot shortlist (#16):");
+{
+  const withEquip = (...eqs) => ({ characters: eqs.map((e, i) => ({ rosterIndex: i, name: "C" + i, equip: e })) });
+  is(slotItemIds(withEquip({ head: 1 }, { head: 2 }, { head: 3 }), "head"), new Set([1, 2, 3]),
+     "the shortlist is the ids this save actually uses in that slot");
+  is(slotItemIds(withEquip({ head: 1 }, { head: 1 }, { head: 1 }), "head"), null,
+     "one distinct id is not a shortlist — fall back to the full list");
+  is(slotItemIds(withEquip({ head: 1 }, { head: 2 }), "head"), null,
+     `fewer than ${SLOT_SHORTLIST_MIN} distinct ids falls back rather than hiding choices`);
+  is(slotItemIds(withEquip({ head: 1, body: 9 }, { head: 2 }, { head: 3 }), "body"), null,
+     "a slot with barely any data falls back");
+  is(slotItemIds(withEquip({ head: 0 }, { head: 0 }, { head: 0 }), "head"), null,
+     "empty slots contribute nothing");
+  is(slotItemIds(null, "head"), null, "no save falls back rather than throwing");
+  is(slotItemIds(withEquip({ head: 1 }, { head: 2 }, { head: 3 }), "feet"), null,
+     "a slot nothing is equipped in falls back");
 }
 
 // ---- health lint ----------------------------------------------------------

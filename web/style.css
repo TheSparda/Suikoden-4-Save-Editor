@@ -312,3 +312,4 @@ button.picker.dirty { color:var(--warn); border-color:var(--warnbd); background-
 .hl-grp { margin-left:auto; font-size:12px; }
 .hl-row .chip { margin-top:8px; }
 .hl-nofix { font-size:12px; margin-top:6px; }
+.picker-scope { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:0 14px 8px; font-size:12px; }
