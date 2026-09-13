@@ -14,7 +14,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const core = createRequire(import.meta.url)(path.resolve(HERE, "..", "s4-core.js"));
 const { REC_STATES, CHAR_CAP, POTCH_MAX, LV_MAX, AFF_RATE, AFF_ALIAS,
         lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal, revertStaged,
-        snapshotFromSave, diffSnapshot, SNAPSHOT_FORMAT, SNAPSHOT_VERSION } = core;
+        snapshotFromSave, diffSnapshot, SNAPSHOT_FORMAT, SNAPSHOT_VERSION,
+        derivePartyState, PARTY_MAX, PARTY_REMOVE_TO, IN_PARTY } = core;
 
 let failures = 0;
 const ok = (m) => console.log("  ✓ " + m);
@@ -227,6 +228,38 @@ console.log("revertStaged — per-field restore:");
   is([o.saveEdits, o.names, o.charEdits], [{}, {}, {}], "reverting every field leaves all three overlays empty");
   is(buildDiff({ save, saveEdits: o.saveEdits, names: o.names, charEdits: o.charEdits }), [],
      "…and buildDiff reports no changes");
+}
+
+// ---- party derivation -----------------------------------------------------
+console.log("Party — derived from the recruitment enum:");
+{
+  const mk = (i, name, recruited) => ({ rosterIndex: i, name, recruited, stats: {}, runes: [], equip: {} });
+  const of = (...cs) => derivePartyState({ characters: cs });
+
+  is(of().members, [], "no characters means an empty party, not a throw");
+  is(derivePartyState(null).members, [], "no save at all is handled");
+  is(of(mk(0, "Lazlo", 15), mk(1, "Snowe", 10), mk(2, "Kika", 11)).members.map((m) => m.name),
+     ["Lazlo", "Kika"], "only 11 and 15 count as in the party");
+  is(IN_PARTY, [11, 15], "the two in-party values are the documented ones");
+  is(of(mk(0, "Lazlo", 15)).members[0].locked, true, "15 is flagged as locked (can't be removed)");
+  is(of(mk(1, "Kika", 11)).members[0].locked, false, "11 is not locked");
+
+  // Order is NOT claimed — the formation array hasn't been located, so saying otherwise would be
+  // inventing data the editor doesn't have.
+  is(of(mk(0, "A", 11)).ordered, false, "the derivation does not claim to know slot order");
+  is(PARTY_MAX, 4, "the party size is the documented one");
+
+  // Over-full is a warning, not an error: the enum permits it and the game's behaviour is
+  // unverified, so the wording says "may" rather than asserting a consequence (rule 1).
+  const over = of(...[11, 11, 11, 11, 11].map((r, i) => mk(i, "C" + i, r)));
+  is(over.problems.map((p) => p.id), ["party-overfull"], "a fifth party member is reported");
+  is(over.problems[0].sev, "warn", "…as a warning, since the enum allows it");
+  is(of(...[11, 11, 11, 11].map((r, i) => mk(i, "C" + i, r))).problems, [],
+     "exactly four is not a problem");
+
+  // Removing means Recruited, not Not Recruited — dropping to 0 would un-recruit someone the
+  // player actually has, which is a different and much worse edit.
+  is(PARTY_REMOVE_TO, 10, "leaving the party sets Recruited (10), never Not Recruited (0)");
 }
 
 // ---- JSON snapshots -------------------------------------------------------

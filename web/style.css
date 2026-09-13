@@ -301,3 +301,4 @@ button.picker.dirty { color:var(--warn); border-color:var(--warnbd); background-
 .fnd-row b { font-weight:600; }
 .fnd-note { padding:10px 16px; }
 .fnd-note summary { cursor:pointer; color:var(--mut); font-size:13px; }
+.refdesc { font-size:12px; margin-top:2px; }

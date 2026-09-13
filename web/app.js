@@ -15,6 +15,8 @@ const EDITOR_DIR = "../Editor";
 const APP_VERSION = "1.6.5";        // keep in lockstep with the footer in index.html
 // Elemental rune affinity reference — AFF_ELEMS / AFF_RATE / AFF_ALIAS are in s4-core.js.
 let AFF = {};                        // character name → [5] affinity ratings (s4_affinities.json)
+let UNITES = {};                     // rosterIndex → slot → {name, with} (s4_unites.json)
+let RUNE_DESC = {};                  // rune id → description (s4_rune_desc.json); {} when absent
 
 let pyReady = null, PY = null;      // PY = resolved pyodide (sync access keeps share() in-gesture)
 let REF = { runes: [], items: [], equipSlots: [], chars: [] };
@@ -110,6 +112,12 @@ def load_reference():
   // Reference-data enrichment (defensive: a missing file just hides the notes).
   try { const a = await (await fetch(`${EDITOR_DIR}/s4_affinities.json`)).json(); delete a._note; AFF = a; }
   catch (e) { AFF = {}; }
+  // Reference data the JS side renders directly. Each is optional: a table that fails to load
+  // leaves its view empty rather than breaking the tab (CLAUDE.md rule 1).
+  try { UNITES = await (await fetch(`${EDITOR_DIR}/s4_unites.json`)).json(); } catch (e) { UNITES = {}; }
+  try { const d = await (await fetch(`${EDITOR_DIR}/s4_rune_desc.json`)).json(); delete d._note;
+        RUNE_DESC = Object.fromEntries(Object.entries(d).map(([k, v]) => [parseInt(k, 16), v])); }
+  catch (e) { RUNE_DESC = {}; }
   PY = py;
   bootProgress(100, "Ready", "done");
   return py;
@@ -389,6 +397,7 @@ function drawSlot(keepStaged) {
       <div class="subtabs">
         <button class="chip" data-sub="chars">Characters (${total})</button>
         <button class="chip" data-sub="recruit">Recruit (${live})</button>
+        <button class="chip" data-sub="party">Party (${(s.characters || []).filter((c) => S4Core.IN_PARTY.includes(recOf(c))).length})</button>
       </div>
       <input class="search" id="sq" placeholder="filter by name or #…">
       <div class="muted" id="subhint" style="margin:2px 0 10px"></div>
@@ -466,7 +475,11 @@ function drawSlot(keepStaged) {
 function showSub() {
   $$("[data-sub]").forEach((b) => b.classList.toggle("on", b.dataset.sub === SUB));
   const hint = $("#subhint");
-  if (SUB === "recruit") {
+  if (SUB === "party") {
+    if (hint) hint.innerHTML = `Who is in the active party right now, derived from the same per-character flag the game checks ` +
+      `(<b>In Party</b> / <b>Permanently In Party</b>). Removing someone here sets them back to <b>Recruited</b>, never to Not Recruited.`;
+    drawParty();
+  } else if (SUB === "recruit") {
     if (hint) hint.innerHTML = `Set each character's recruitment status in one place — the exact per-character flag the game checks. ` +
       `<b>Recruiting a character the story hasn't unlocked yet can soft-lock an early save</b> — keep a backup. Changes are staged until you Apply.`;
     drawRecruit();
@@ -540,6 +553,39 @@ function drawRecruit() {
       const tr = se.closest("tr");
       if (tr) { tr.classList.toggle("dirtyrow", +se.value !== c.recruited); tr.classList.toggle("unrec", +se.value === 0); }
     });
+  }));
+}
+
+// Party view (#11). Membership comes from the recruitment enum, which is the game's own flag, so
+// this needs no new reverse engineering and ships today. Slot ORDER does not: the formation array
+// hasn't been located, so the order here is roster order and the UI says so rather than implying
+// a formation it can't know.
+function drawParty() {
+  const s = saves[curSlot];
+  const st = S4Core.derivePartyState({ characters: (s.characters || []).map((c) => ({ ...c, recruited: recOf(c) })) });
+  const box = $("#subview");
+  const warn = st.problems.map((p) =>
+    `<div class="warnbox" style="margin-bottom:10px"><b>${esc(p.title)}</b><div class="muted">${esc(p.detail)}</div></div>`).join("");
+  if (!st.members.length) {
+    box.innerHTML = warn + `<div class="muted" style="padding:6px 2px">Nobody is marked as in the party.
+      Set a character to “${esc(recName(11))}” on the Recruit tab.</div>`;
+    return;
+  }
+  box.innerHTML = warn
+    + `<table class="invtbl"><thead><tr><th>#</th><th>Character</th><th>Status</th><th></th></tr></thead><tbody>`
+    + st.members.map((m, i) => `<tr>
+        <td class="sl">${i + 1}</td><td>${esc(m.name)}</td>
+        <td><span class="pill on">${esc(recName(m.recruited))}</span></td>
+        <td>${m.locked ? `<span class="muted">can't be removed</span>`
+              : `<button type="button" class="chip mini" data-partyout="${m.rosterIndex}">remove</button>`}</td>
+      </tr>`).join("")
+    + `</tbody></table>`
+    + `<div class="muted" style="padding:8px 2px">${st.members.length} of ${st.max} · listed in roster order —
+       the in-game formation order is stored separately and hasn't been located yet, so it isn't shown.</div>`;
+  $$("[data-partyout]").forEach((b) => (b.onclick = () => {
+    const ri = +b.dataset.partyout, c = charByRoster(ri);
+    staged(`${c ? c.name : "#" + ri} · leave party`, null, () => { ce(ri).recruited = S4Core.PARTY_REMOVE_TO; });
+    drawSlot(true);
   }));
 }
 
@@ -904,39 +950,85 @@ function downloadBytes(bytes, name) {
 
 // ---- Reference tab ---------------------------------------------------------
 let refRendered = false;
+// Reference is a shell of sub-views, each one entry plus one draw function (#36) — the same
+// shape as the ISO editor's tab bar, so adding a view is the view, not the plumbing.
+// Everything here is rendered from JSON already committed to the repo; nothing is fetched live
+// (CLAUDE.md rule 4).
+const REF_VIEWS = [
+  ["chars", "Characters", () => REF.chars.length, drawRefList],
+  ["items", "Items", () => REF.items.length, drawRefList],
+  ["runes", "Runes", () => REF.runes.length, drawRefList],
+  ["aff", "Rune affinities", () => Object.keys(AFF).length, drawRefAffinities],
+  ["unites", "Unite attacks", () => uniteRows().length, drawRefUnites],
+];
+let REF_VIEW = "chars";
+
 function renderReference() {
   refRendered = true;
-  const s = $("#refRoot");
-  s.innerHTML = `<div class="card"><div class="row">
-    <b class="acc2">Reference</b><span class="muted">${REF.chars.length} characters · ${REF.items.length} items · ${REF.runes.length} runes</span>
-    <span style="flex:1"></span><input class="search" id="rq" placeholder="filter…" style="max-width:220px"></div>
-    <div class="row" style="margin-top:8px">
-      <select id="rkind" style="max-width:200px">
-       <option value="chars">Characters</option><option value="items">Items</option>
-       <option value="runes">Runes</option><option value="aff">Rune affinities</option></select></div>
+  $("#refRoot").innerHTML = `<div class="card">
+    <div class="subtabs" id="refViews"></div>
+    <div class="row"><input class="search" id="rq" placeholder="filter…" style="max-width:260px"></div>
     <div id="reftbl" style="margin-top:10px;max-height:60vh;overflow:auto"></div></div>`;
-  $("#rkind").onchange = renderRefTable;
   $("#rq").oninput = renderRefTable;
   renderRefTable();
 }
-function renderRefTable() {
-  const kind = $("#rkind").value, q = ($("#rq").value || "").toLowerCase();
-  if (kind === "aff") {
-    const names = Object.keys(AFF).filter((n) => !q || n.toLowerCase().includes(q)).sort();
-    $("#reftbl").innerHTML = `<table class="invtbl"><thead><tr><th>Character</th>${AFF_ELEMS.map((e) => `<th>${e}</th>`).join("")}</tr></thead><tbody>`
-      + (names.map((n) => `<tr><td>${esc(n)}</td>${(AFF[n] || []).map((v) => `<td><span class="aff a${v}" title="${AFF_RATE[v]}">${v}</span></td>`).join("")}</tr>`).join(""))
-      + `</tbody></table><div class="muted" style="padding:8px">1 poor – 4 excellent · order Fire · Lightning · Water · Wind · Earth · source: GameFAQs Rune Affinity FAQ (OmegaDL50)</div>`;
-    return;
+
+// Flatten s4_unites.json (rosterIndex → slot → {name, with}) into rows. The file is keyed by
+// roster index, so the character name is joined from the same table the editor uses elsewhere
+// rather than being stored a second time.
+function uniteRows() {
+  const out = [];
+  for (const [ri, slots] of Object.entries(UNITES || {})) {
+    for (const [slot, u] of Object.entries(slots || {})) {
+      out.push({ ri: +ri, slot: +slot, who: charRefLabel(+ri), name: u.name, with: u.with || "" });
+    }
   }
+  return out.sort((a, b) => a.ri - b.ri || a.slot - b.slot);
+}
+
+function renderRefTable() {
+  const v = REF_VIEWS.find(([k]) => k === REF_VIEW) || REF_VIEWS[0];
+  const host = $("#refViews");
+  if (host) {
+    // Live counts, as S3's do — a count that silently went to zero is the clearest possible
+    // signal that a reference table failed to load.
+    host.innerHTML = REF_VIEWS.map(([k, label, count]) =>
+      `<button class="chip${k === REF_VIEW ? " on" : ""}" data-refview="${k}" aria-pressed="${k === REF_VIEW}">${esc(label)} <span class="pill">${count()}</span></button>`).join("");
+    $$("[data-refview]").forEach((b) => (b.onclick = () => { REF_VIEW = b.dataset.refview; renderRefTable(); }));
+  }
+  const q = ($("#rq")?.value || "").toLowerCase();
+  v[3](q, v[0]);
+}
+
+function drawRefList(q, kind) {
   const src = kind === "chars" ? REF.chars.map((c) => ({ id: c.index, name: c.name })) : REF[kind];
   const rows = src.filter((x) => !q || x.name.toLowerCase().includes(q) || hx(x.id, 4).toLowerCase().includes(q) || String(x.id) === q);
   const idLabel = kind === "chars" ? (id) => "#" + id : (id) => "0x" + hx(id, kind === "runes" ? 2 : 4);
+  // Runes carry a description when one has been extracted; per house rule 1 a rune without one
+  // renders nothing rather than an invented blurb.
+  const desc = (x) => (kind === "runes" && RUNE_DESC[x.id]) ? `<div class="muted refdesc">${esc(RUNE_DESC[x.id])}</div>` : "";
   $("#reftbl").innerHTML = `<table class="invtbl"><thead><tr><th>${kind === "chars" ? "Index" : "ID"}</th><th>Name</th></tr></thead><tbody>`
-    + rows.slice(0, 600).map((x) => `<tr><td class="sl">${idLabel(x.id)}</td><td>${esc(x.name)}</td></tr>`).join("")
+    + rows.slice(0, 600).map((x) => `<tr><td class="sl">${idLabel(x.id)}</td><td>${esc(x.name)}${desc(x)}</td></tr>`).join("")
     + `</tbody></table>` + (rows.length > 600 ? `<div class="muted" style="padding:8px">showing 600 of ${rows.length}</div>` : "");
 }
 
-// ---- misc ------------------------------------------------------------------
+function drawRefAffinities(q) {
+  const names = Object.keys(AFF).filter((n) => !q || n.toLowerCase().includes(q)).sort();
+  $("#reftbl").innerHTML = `<table class="invtbl"><thead><tr><th>Character</th>${AFF_ELEMS.map((e) => `<th>${e}</th>`).join("")}</tr></thead><tbody>`
+    + (names.map((n) => `<tr><td>${esc(n)}</td>${(AFF[n] || []).map((v) => `<td><span class="aff a${v}" title="${AFF_RATE[v]}">${v}</span></td>`).join("")}</tr>`).join(""))
+    + `</tbody></table><div class="muted" style="padding:8px">1 poor – 4 excellent · order Fire · Lightning · Water · Wind · Earth · source: GameFAQs Rune Affinity FAQ (OmegaDL50)</div>`;
+}
+
+// The unite table existed only as a tooltip on a character card; this answers "which unites are
+// there and who do I need" in one place, from the same committed JSON.
+function drawRefUnites(q) {
+  const rows = uniteRows().filter((u) => !q || u.name.toLowerCase().includes(q)
+    || u.who.toLowerCase().includes(q) || u.with.toLowerCase().includes(q));
+  $("#reftbl").innerHTML = `<table class="invtbl"><thead><tr><th>Character</th><th>Unite</th><th>Partners</th></tr></thead><tbody>`
+    + rows.map((u) => `<tr><td>${esc(u.who)}</td><td>${esc(u.name)}</td><td class="muted">${esc(u.with)}</td></tr>`).join("")
+    + `</tbody></table><div class="muted" style="padding:8px">${rows.length} unite${rows.length === 1 ? "" : "s"} across ${new Set(rows.map((r) => r.ri)).size} characters · source: ninjaskipper's GameFAQs Combo Attacks guide</div>`;
+}
+
 function setStatus(msg, kind) { const el = $("#status"); if (el) { el.textContent = msg; el.className = "status" + (kind ? " " + kind : ""); } }
 function setDropMsg(msg, isErr) { const el = $("#engineStatus"); if (el) el.innerHTML = (isErr ? "⚠ " : "") + esc(msg); }
 function bootProgress(pct, msg, step) {

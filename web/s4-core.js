@@ -188,6 +188,49 @@
     return { saveEdits, names, charEdits };
   }
 
+  // ---- party (#11) ---------------------------------------------------------
+
+  // Suikoden IV fields four on land. The game's own flag is the recruitment byte — 11 "In Party"
+  // and 15 "Permanently In Party" — so the roster can be read without locating a slot array.
+  const PARTY_MAX = 4;
+  const IN_PARTY = [11, 15];
+
+  // Derive the active party from the recruitment enum.
+  //
+  // Read-only by nature: this is the membership flag, not the slot order. The order shown is
+  // roster order, which is NOT necessarily the in-game formation — that lives in an array not
+  // yet located, and claiming an order we haven't verified would be inventing data (rule 1).
+  // `ordered: false` says so to the caller rather than leaving it to be assumed.
+  function derivePartyState(save) {
+    const chars = (save && save.characters) || [];
+    const members = chars.filter((c) => IN_PARTY.includes(c.recruited))
+      .map((c) => ({ rosterIndex: c.rosterIndex, name: c.name, recruited: c.recruited,
+                     locked: c.recruited === 15 }));
+    const problems = [];
+    if (members.length > PARTY_MAX) {
+      problems.push({
+        id: "party-overfull", sev: "warn",
+        title: `${members.length} characters are marked as in the party (the game fields ${PARTY_MAX})`,
+        detail: "The game may ignore the extras, or behave unpredictably. Set the ones you don't "
+              + "want to " + recName(10) + ".",
+      });
+    }
+    // 11/15 on someone the game doesn't consider recruited is a contradiction the enum allows
+    // but the game shouldn't see.
+    const ghost = members.filter((m) => !chars.some((c) => c.rosterIndex === m.rosterIndex && c.recruited >= 10));
+    if (ghost.length) {
+      problems.push({ id: "party-unrecruited", sev: "error",
+        title: "In the party but not recruited",
+        detail: ghost.map((g) => g.name).join(", ") });
+    }
+    return { members, max: PARTY_MAX, ordered: false, problems };
+  }
+
+  // Removing someone from the party means "Recruited", not "Not Recruited" — dropping them to 0
+  // would un-recruit a character the player actually has, which is a different and much worse
+  // edit than the one they asked for.
+  const PARTY_REMOVE_TO = 10;
+
   // ---- JSON snapshots (#14) ------------------------------------------------
 
   const SNAPSHOT_FORMAT = "s4save-snapshot";
@@ -351,6 +394,7 @@
     AFF_ELEMS, AFF_RATE, AFF_ALIAS,
     lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal, revertStaged,
     snapshotFromSave, diffSnapshot, SNAPSHOT_FORMAT, SNAPSHOT_VERSION,
+    derivePartyState, PARTY_MAX, PARTY_REMOVE_TO, IN_PARTY,
   };
   Object.assign(root, API);
   root.S4Core = API;
