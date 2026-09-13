@@ -47,3 +47,26 @@ jobs:
       - name: Run the test suite
         working-directory: web/tests
         run: npm test
+
+  # The browser suite is a separate job so the fast checks still gate in seconds. It installs a
+  # Chromium, which the headless suite deliberately does not need — `npm test` has to stay
+  # runnable on a clean clone with nothing installed.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test deps
+        working-directory: web/tests
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium
+        working-directory: web/tests
+        run: npx --yes playwright@1.62.1 install --with-deps chromium
+      - name: Run the e2e suite
+        working-directory: web/tests
+        run: npm run test:e2e

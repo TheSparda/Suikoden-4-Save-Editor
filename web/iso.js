@@ -588,6 +588,9 @@
     };
   }
 
-  // exposed for app.js's mode switcher
-  window.ISO = { init, undo: () => JOURNAL.undo(), redo: () => JOURNAL.redo(), loaded: () => !!Object.keys(WINDOWS).length };
+  // exposed for app.js's mode switcher. FIELDS rides along read-only so the test fixture can be
+  // generated from the editor's own table rather than a second copy of the offsets (#9): a
+  // fixture built from duplicated constants proves the duplicate, not the code under test.
+  window.ISO = { init, undo: () => JOURNAL.undo(), redo: () => JOURNAL.redo(),
+                 loaded: () => !!Object.keys(WINDOWS).length, FIELDS };
 })();

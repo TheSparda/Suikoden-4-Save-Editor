@@ -10,6 +10,11 @@
     "test:boot": "node boot-gate.mjs",
     "test:version": "node version-drift.mjs",
     "test:nodata": "node no-game-data.mjs",
-    "test:roundtrip": "node save-roundtrip.mjs"
+    "test:roundtrip": "node save-roundtrip.mjs",
+    "test:e2e": "node e2e.mjs",
+    "synth": "node synth-s4-iso.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.62.1"
   }
 }

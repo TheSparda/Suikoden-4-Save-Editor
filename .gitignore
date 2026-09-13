@@ -13,3 +13,6 @@ Cheats/
 __pycache__/
 *.pyc
 .DS_Store
+# Node test deps (playwright-core for the e2e suite) — installed, never committed
+web/tests/node_modules/
+web/tests/package-lock.json
