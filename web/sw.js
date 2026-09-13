@@ -13,7 +13,7 @@ const CACHE = "s4editor-v1.6.5";
 const SHARE_CACHE = "s4editor-share";   // must match app.js (share-target hand-off); never versioned —
                                         // it holds a file shared into the PWA that is waiting to be opened
 const SHELL = [
-  "./", "./index.html", "./style.css", "./app.js", "./iso.js", "./manifest.webmanifest",
+  "./", "./index.html", "./style.css", "./s4-core.js", "./app.js", "./iso.js", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png",
 ];
 

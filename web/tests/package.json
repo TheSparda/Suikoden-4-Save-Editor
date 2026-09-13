@@ -3,8 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run test:validate && npm run test:version && npm run test:nodata && npm run test:roundtrip",
+    "test": "npm run test:validate && npm run test:core && npm run test:version && npm run test:nodata && npm run test:roundtrip",
     "test:validate": "node validate.mjs",
+    "test:core": "node s4-core.mjs",
     "test:version": "node version-drift.mjs",
     "test:nodata": "node no-game-data.mjs",
     "test:roundtrip": "node save-roundtrip.mjs"

@@ -6,12 +6,17 @@
 import fs from "fs";
 import path from "path";
 import { execFileSync } from "child_process";
+import { createRequire } from "module";
 import { fileURLToPath } from "url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.resolve(HERE, "..");
 const REPO = path.resolve(WEB, "..");
 const ED = path.join(REPO, "Editor");
+// The real rules, not a second copy of them (issue #2). Anything this file used to duplicate
+// from app.js as a literal or a regex should come from here instead — that is the whole point of
+// the module existing.
+const S4Core = createRequire(import.meta.url)(path.join(WEB, "s4-core.js"));
 let failures = 0;
 const ok = (m) => console.log("  ✓ " + m);
 const bad = (m) => { console.log("  ✗ " + m); failures++; };
@@ -84,12 +89,12 @@ const affEntries = Object.entries(aff).filter(([k]) => !k.startsWith("_"));
 const affBad = affEntries.filter(([, v]) => !Array.isArray(v) || v.length !== 5 || v.some((x) => x < 1 || x > 4));
 (affEntries.length >= 40 ? ok : bad)(`affinity entries: ${affEntries.length}`);
 (affBad.length === 0 ? ok : bad)("every affinity is [5] with values 1–4" + (affBad.length ? " (bad: " + affBad.map((x) => x[0]).join(", ") + ")" : ""));
-// coverage against the roster, honouring the one alias in app.js
+// Coverage against the roster, resolved through the engine's own affFor() rather than a
+// hand-copied alias table — this file used to carry `const ALIAS = { Frederica: "Fredrica" }`
+// with a "must match app.js" comment, which is exactly the second copy #2 removed.
 const roster = new Set(Object.values(chars));
-const ALIAS = { Frederica: "Fredrica" };   // must match AFF_ALIAS in app.js
-const resolvable = [...roster].filter((n) => aff[n] || aff[ALIAS[n]]).length;
+const resolvable = [...roster].filter((n) => S4Core.affFor(aff, n)).length;
 (resolvable >= 40 ? ok : bad)(`roster characters with an affinity note: ${resolvable}`);
-(/AFF_ALIAS\s*=\s*{\s*"Frederica"\s*:\s*"Fredrica"/.test(app) ? ok : bad)("app.js carries the Frederica→Fredrica alias");
 (/s4_affinities\.json/.test(app) ? ok : bad)("app.js fetches s4_affinities.json (defensively)");
 
 // 7) v2 depth features wired: presets (B18) + PWA force-refresh/version check (B17)
@@ -116,6 +121,11 @@ const isoOffs = [...iso.matchAll(/off:\s*(0x[0-9A-Fa-f]+)/g)].map((m) => parseIn
 (/src=["']iso\.js["']/.test(html) ? ok : bad)("index.html loads iso.js");
 (/iso\.js/.test(sw) ? ok : bad)("service worker precaches iso.js");
 (/window\.ISO/.test(app) && /window\.ISO\.init/.test(app) ? ok : bad)("app.js hands off to the ISO editor on the iso tab");
+// s4-core.js defines globals app.js reads, so load order is load-bearing: a later tag would
+// leave app.js referencing undefined at parse time.
+const coreTag = html.indexOf('src="s4-core.js"'), appTag = html.indexOf('src="app.js"');
+(coreTag >= 0 && appTag >= 0 && coreTag < appTag ? ok : bad)("index.html loads s4-core.js before app.js");
+(/s4-core\.js/.test(sw) ? ok : bad)("service worker precaches s4-core.js");
 
 // 8) version lockstep: app.js APP_VERSION === index.html footer version (B12 corollary)
 console.log("Version lockstep:");

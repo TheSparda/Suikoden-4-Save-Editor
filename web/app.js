@@ -10,20 +10,11 @@
 
 const SAVE_PATH = "/save.bin";
 const EDITOR_DIR = "../Editor";
-// recruitment status enum — the exact byte the game checks (s4save.RECRUIT_STATES)
-const REC_STATES = [[0, "Not Recruited"], [1, "In Your Company"], [10, "Recruited"],
-                    [11, "In Party"], [15, "Permanently In Party"]];
-const STAT_NAMES = ["STR", "SKL", "MAG", "EVA", "PDF", "MDF", "SPD", "LUK"];
-const GEAR_LABELS = { head: "Head", body: "Body", hands: "Hands", feet: "Feet",
-                      acc1: "Accessory 1", acc2: "Accessory 2", acc3: "Accessory 3" };
-const CHAR_CAP = { maxHP: 9999, exp: 98999, weaponLvl: 15 };
-const POTCH_MAX = 99999999;
+// REC_STATES, STAT_NAMES, GEAR_LABELS, CHAR_CAP and POTCH_MAX live in s4-core.js, which
+// index.html loads first — they are read here as globals.
 const APP_VERSION = "1.6.5";        // keep in lockstep with the footer in index.html
-// Elemental rune affinity reference (s4_affinities.json) — teaches which runes suit a unit.
-const AFF_ELEMS = ["Fire", "Lightning", "Water", "Wind", "Earth"];
-const AFF_RATE = { 1: "poor", 2: "average", 3: "good", 4: "excellent" };
-const AFF_ALIAS = { "Frederica": "Fredrica" };   // roster name → affinity-table key
-let AFF = {};                        // character name → [5] affinity ratings
+// Elemental rune affinity reference — AFF_ELEMS / AFF_RATE / AFF_ALIAS are in s4-core.js.
+let AFF = {};                        // character name → [5] affinity ratings (s4_affinities.json)
 
 let pyReady = null, PY = null;      // PY = resolved pyodide (sync access keeps share() in-gesture)
 let REF = { runes: [], items: [], equipSlots: [], chars: [] };
@@ -59,9 +50,6 @@ const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const hx = (n, w) => (n >>> 0).toString(16).toUpperCase().padStart(w, "0");
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const lvFromExp = (exp) => Math.min(99, Math.floor((exp || 0) / 1000) + 1);
-const expFromLv = (lv) => (Math.min(99, Math.max(1, lv)) - 1) * 1000;
-const gtLabel = (sec) => `${Math.floor((sec || 0) / 3600)}h${String(Math.floor(((sec || 0) % 3600) / 60)).padStart(2, "0")}m`;
 
 // ---- Pyodide bootstrap -----------------------------------------------------
 async function bootPyodide() {
@@ -126,8 +114,8 @@ def load_reference():
   bootProgress(100, "Ready");
   return py;
 }
-// character name → affinity ratings (with the one roster/table alias), or null
-function affFor(name) { return AFF[name] || AFF[AFF_ALIAS[name]] || null; }
+// character name → affinity ratings, or null — the rule is in s4-core.js; app.js owns the table.
+function affForName(name) { return S4Core.affFor(AFF, name); }
 
 // ---- label helpers ---------------------------------------------------------
 function itemLabel(id) { return id ? (ITEM_BY_ID[id]?.name || "#" + id) : "— empty —"; }
@@ -484,7 +472,7 @@ function charCard(c) {
     (REC_STATES.some(([v]) => v === rcur) ? "" : `<option value="${rcur}" selected>? (${rcur})</option>`);
 
   // B13 reference enrichment: elemental rune affinity (which runes suit this unit)
-  const aff = affFor(c.name);
+  const aff = affForName(c.name);
   const affNote = aff ? `<div class="fnote">Rune affinity: ${aff.map((v, i) =>
       `<span class="aff a${v}" title="${AFF_ELEMS[i]} — ${AFF_RATE[v]}">${AFF_ELEMS[i]} ${v}</span>`).join(" · ")}
       <span class="muted">(1 poor–4 excellent · GameFAQs affinity FAQ)</span></div>` : "";
@@ -599,36 +587,15 @@ function refreshDirty() {
 // ---- build review + apply --------------------------------------------------
 function countEffective() { return buildDiff().length; }
 
+// Thin wrapper over the core's pure transform: app.js owns the staged-edit globals and the
+// reference tables, s4-core.js owns the rule for what counts as a change.
 function buildDiff() {
-  const s = saves[curSlot];
-  const rows = [];
-  const byRi = {}; (s.characters || []).forEach((c) => (byRi[c.rosterIndex] = c));
-
-  if ("potch" in SAVEDITS && SAVEDITS.potch !== s.potch) rows.push({ g: "Save", t: `Potch: ${s.potch} → ${SAVEDITS.potch}` });
-  if ("gameTime" in SAVEDITS && SAVEDITS.gameTime !== s.gameTimeSec) rows.push({ g: "Save", t: `Game time: ${gtLabel(s.gameTimeSec)} → ${gtLabel(SAVEDITS.gameTime)}` });
-  if (SAVEDITS.worldMapFull) rows.push({ g: "Save", t: `World map → mark fully explored` });
-
-  Object.entries(NAMES).forEach(([k, v]) => {
-    const n = (s.names || []).find((x) => x.key === k);
-    if (n && v !== n.value) rows.push({ g: "Names", t: `${n.label}: "${n.value}" → "${v}"` });
+  return S4Core.buildDiff({
+    save: saves[curSlot],
+    saveEdits: SAVEDITS, names: NAMES, charEdits: CE,
+    labels: { item: itemLabel, rune: runeLabel },
   });
-
-  Object.entries(CE).forEach(([ri, f]) => {
-    const c = byRi[ri] || byRi[+ri] || {}; const who = c.name || `#${ri}`;
-    Object.entries(f).forEach(([k, v]) => {
-      if (k === "stats") Object.entries(v).forEach(([st, nv]) => { if (nv !== c.stats?.[st]) rows.push({ g: who, t: `${st}: ${c.stats?.[st]} → ${nv}` }); });
-      else if (k === "runes") Object.entries(v).forEach(([slot, nv]) => { if (nv !== (c.runes?.[+slot] || 0)) rows.push({ g: who, t: `Rune ${+slot + 1}: ${runeLabel(c.runes?.[+slot] || 0)} → ${runeLabel(nv)}` }); });
-      else if (k === "equip") Object.entries(v).forEach(([slot, nv]) => { if (nv !== (c.equip?.[slot] || 0)) rows.push({ g: who, t: `${GEAR_LABELS[slot] || slot}: ${itemLabel(c.equip?.[slot] || 0)} → ${itemLabel(nv)}` }); });
-      else if (k === "unites") Object.entries(v).forEach(([slot, nv]) => { const old = (c.unites || [])[+slot] || 0; if (nv !== old) { const un = (c.uniteNames || {})[slot]; rows.push({ g: who, t: `Unite ${un ? un.name : "#" + slot}: ${old} → ${nv}` }); } });
-      else if (k === "exp") { if (v !== c.exp) rows.push({ g: who, t: `Level ${lvFromExp(c.exp)} → ${lvFromExp(v)} (EXP ${c.exp} → ${v})` }); }
-      else if (k === "weaponLvl") { if (v !== c.weaponLvl) rows.push({ g: who, t: `Weapon Lv: ${c.weaponLvl} → ${v}` }); }
-      else if (k === "maxHP") { if (v !== c.maxHP) rows.push({ g: who, t: `Max HP: ${c.maxHP} → ${v}` }); }
-      else if (k === "recruited") { if (v !== c.recruited) rows.push({ g: who, t: `Recruitment: ${recName(c.recruited)} → ${recName(v)}` }); }
-    });
-  });
-  return rows;
 }
-function recName(v) { const r = REC_STATES.find((x) => x[0] === v); return r ? r[1] : `? (${v})`; }
 
 function openConfirm(rows, onConfirm, okLabel) {
   const groups = {}; rows.forEach((r) => (groups[r.g] = groups[r.g] || []).push(r.t));
