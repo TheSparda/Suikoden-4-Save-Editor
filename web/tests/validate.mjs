@@ -127,6 +127,31 @@ const coreTag = html.indexOf('src="s4-core.js"'), appTag = html.indexOf('src="ap
 (coreTag >= 0 && appTag >= 0 && coreTag < appTag ? ok : bad)("index.html loads s4-core.js before app.js");
 (/s4-core\.js/.test(sw) ? ok : bad)("service worker precaches s4-core.js");
 
+// 7b) ISO tab shell (#5). iso.js is an IIFE that touches window on load, so it can't be imported
+// here — these are source-level checks until it grows its own *-core module. The invariant that
+// matters: a FIELD whose `view` doesn't match a VIEWS key renders on no tab at all. It would not
+// throw, it would just silently vanish from the UI, which is the failure this catches.
+console.log("ISO tab shell (#5):");
+const viewKeys = [...iso.matchAll(/^\s*\["(\w+)",\s*"[^"]+",\s*\w+\],/gm)].map((m) => m[1]);
+(viewKeys.length >= 1 ? ok : bad)(`VIEWS declares ${viewKeys.length} tab(s): ${viewKeys.join(", ")}`);
+const fieldViews = [...iso.matchAll(/key:\s*"(\w+)",\s*view:\s*"(\w+)"/g)].map((m) => [m[1], m[2]]);
+const fieldKeys = [...iso.matchAll(/^\s*key:\s*"(\w+)"/gm)].map((m) => m[1]);
+(fieldViews.length === fieldKeys.length ? ok : bad)(
+  `every FIELD carries a view (${fieldViews.length}/${fieldKeys.length})`);
+const orphans = fieldViews.filter(([, v]) => !viewKeys.includes(v));
+(orphans.length === 0 ? ok : bad)(orphans.length
+  ? `fields pointing at a view that doesn't exist (they would render nowhere): ${orphans.map(([k, v]) => `${k}→${v}`).join(", ")}`
+  : "every field's view matches a declared tab");
+const empty = viewKeys.filter((v) => !iso.includes(`f.view === "${v}"`) && !fieldViews.some(([, fv]) => fv === v));
+(empty.length === 0 ? ok : bad)(empty.length ? `tabs with no fields and no draw filter: ${empty.join(", ")}` : "every tab has content");
+// The toolbar must live outside the tab host, or edits staged on one tab can't be applied from
+// another — that is the whole reason the shell is shaped this way.
+const hostIdx = iso.indexOf('<div id="isoViewHost">'), saveIdx = iso.indexOf('id="isoSave"');
+(hostIdx >= 0 && saveIdx > hostIdx ? ok : bad)("the save toolbar renders outside the tab host");
+(/localStorage\.setItem\(VIEW_KEY/.test(iso) && /localStorage\.getItem\(VIEW_KEY/.test(iso)
+  ? ok : bad)("the active tab is persisted to localStorage");
+(/VIEWS\.some\(\(\[k\]\) => k === VIEW\)/.test(iso) ? ok : bad)("a persisted tab that no longer exists falls back to the first");
+
 // 8) version lockstep: app.js APP_VERSION === index.html footer version (B12 corollary)
 console.log("Version lockstep:");
 const appVer = (/APP_VERSION\s*=\s*"(\d+\.\d+\.\d+)"/.exec(app) || [])[1];

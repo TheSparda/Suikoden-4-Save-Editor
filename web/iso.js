@@ -20,7 +20,7 @@
   // bool:    a code patch — onBytes when checked, offBytes (the stock instruction) when not.
   const FIELDS = [
     {
-      key: "encounterRate", group: "Random encounters", type: "percent",
+      key: "encounterRate", view: "encounter", group: "Random encounters", type: "percent",
       label: "Encounter rate", off: 0x10E43C, len: 4, def: 100, min: 1, max: 1000,
       unit: "% of normal",
       presets: [["¼", 25], ["Half", 50], ["Stock", 100], ["Double", 200], ["Triple", 300]],
@@ -35,7 +35,7 @@
       },
     },
     {
-      key: "championAlways", group: "Random encounters", type: "bool",
+      key: "championAlways", view: "encounter", group: "Random encounters", type: "bool",
       label: "Champion's Rune effect — always on",
       sub: "Skip battles against enemies weaker than your party, for the whole party, without " +
            "equipping the rune. Strong parties get near-total peace; weaker parties still fight. " +
@@ -49,7 +49,7 @@
       write: (dv, on) => { (on ? [0, 0, 0, 0] : [0x09, 0x00, 0x80, 0x12]).forEach((v, i) => dv.setUint8(i, v)); },
     },
     {
-      key: "noBattles", group: "Random encounters", type: "bool",
+      key: "noBattles", view: "encounter", group: "Random encounters", type: "bool",
       label: "Turn off random battles completely",
       sub: "No random encounters anywhere — stronger than the Champion's Rune, which only stops " +
            "battles with weaker enemies. For fewer (not zero) battles, lower the rate instead; for " +
@@ -194,24 +194,31 @@
     showRecent();
   }
 
+  // ---- tab shell -----------------------------------------------------------
+  // Adding an editor surface is one VIEWS entry plus one draw(host) function — the shell is
+  // deliberately trivial so the cost of a new tab is the editor, not the plumbing. Eight issues
+  // (#19 #20 #21 #23–#30) are queued behind this, so it exists before the first of them rather
+  // than being retrofitted after the third.
+  //
+  // The save/apply toolbar lives OUTSIDE the tab host on purpose: edits staged across several
+  // tabs belong to one disc, so they review and apply together as a single change set.
+  const VIEWS = [
+    ["encounter", "Encounters", drawEncounters],
+  ];
+  const VIEW_KEY = "s4editor-iso-view";
+  let VIEW = (() => { try { return localStorage.getItem(VIEW_KEY) || VIEWS[0][0]; } catch (e) { return VIEWS[0][0]; } })();
+  if (!VIEWS.some(([k]) => k === VIEW)) VIEW = VIEWS[0][0];   // a tab removed since last visit
+
   function render() {
     if (!Object.keys(WINDOWS).length) return;
-    const groups = {};
-    FIELDS.forEach((f) => (groups[f.group] = groups[f.group] || []).push(f));
     const mode = saveMode();
     const modeNote = mode === "inplace" ? "edits write in place to your ISO"
       : mode === "stream" ? "saving streams a patched copy to your downloads"
       : "this browser can't write the ISO — copy the pnach line instead";
 
-    const groupHtml = Object.entries(groups).map(([g, fs]) => {
-      const vals = fs.filter((f) => f.type !== "bool"), bools = fs.filter((f) => f.type === "bool");
-      return `<div class="card"><h3 class="sec">${esc(g)}</h3>
-        ${vals.length ? `<div class="isovals">${vals.map(fieldHtml).join("")}</div>` : ""}
-        ${bools.length ? `<div class="isotoggles">${bools.map(fieldHtml).join("")}</div>` : ""}
-      </div>`;
-    }).join("");
-
-    $("#isoEditor").innerHTML = groupHtml + `
+    $("#isoEditor").innerHTML = `
+      <div class="card"><div class="subtabs" id="isoViews"></div></div>
+      <div id="isoViewHost"></div>
       <div class="card">
         <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
           <button class="chip" id="isoPnach">⧉ Copy pnach line</button>
@@ -226,17 +233,60 @@
         </div>
       </div>`;
 
-    FIELDS.forEach(wireField);
-    syncEnable();
     const sv = $("#isoSave"); if (sv) sv.onclick = save;
     const rs = $("#isoReset"); if (rs) rs.onclick = () => { for (const k in WINDOWS) WINDOWS[k].buf.set(WINDOWS[k].orig); render(); };
     $("#isoPnach").onclick = copyPnach;
+    drawView();
+  }
+
+  // Re-renders the tab strip and the active tab only. Staged edits live in WINDOWS[].buf, which
+  // this never touches, so switching tabs cannot lose one — and because fieldHtml reads from the
+  // buffer and re-applies .dirty, a staged edit still *looks* staged when you come back to it.
+  function drawView() {
+    const v = VIEWS.find(([k]) => k === VIEW) || VIEWS[0];
+
+    refreshViewTabs();
+
+    const host = $("#isoViewHost");
+    host.innerHTML = "";
+    v[2](host);
+    FIELDS.forEach(wireField);   // no-ops for fields the active tab didn't render
+    syncEnable();
+  }
+
+  // The per-tab count of staged edits. Redrawn on every commit as well as on a tab switch —
+  // a badge that only refreshed when you changed tabs would under-report the tab you are on,
+  // which is the one you are most likely to be looking at.
+  function refreshViewTabs() {
+    const host = $("#isoViews"); if (!host) return;
+    host.innerHTML = VIEWS.map(([k, label]) => {
+      const n = FIELDS.filter((f) => f.view === k && isDirty(f.key)).length;
+      return `<button class="chip${k === VIEW ? " on" : ""}" data-view="${k}" aria-pressed="${k === VIEW}"`
+        + `>${esc(label)}${n ? ` <span class="pill on" title="${n} staged edit${n === 1 ? "" : "s"}">${n}</span>` : ""}</button>`;
+    }).join("");
+    $$("[data-view]").forEach((b) => (b.onclick = () => {
+      VIEW = b.dataset.view;
+      try { localStorage.setItem(VIEW_KEY, VIEW); } catch (e) {}
+      drawView();
+    }));
+  }
+
+  function drawEncounters(host) {
+    const groups = {};
+    FIELDS.filter((f) => f.view === "encounter").forEach((f) => (groups[f.group] = groups[f.group] || []).push(f));
+    host.innerHTML = Object.entries(groups).map(([g, fs]) => {
+      const vals = fs.filter((f) => f.type !== "bool"), bools = fs.filter((f) => f.type === "bool");
+      return `<div class="card"><h3 class="sec">${esc(g)}</h3>
+        ${vals.length ? `<div class="isovals">${vals.map(fieldHtml).join("")}</div>` : ""}
+        ${bools.length ? `<div class="isotoggles">${bools.map(fieldHtml).join("")}</div>` : ""}
+      </div>`;
+    }).join("");
   }
 
   function fieldHtml(f) {
     const w = win(f.key); const cur = f.read(w.dv);
     if (f.type === "bool") {
-      return `<label class="isotoggle"><input type="checkbox" data-iso="${f.key}" ${cur ? "checked" : ""}>
+      return `<label class="isotoggle"><input type="checkbox" data-iso="${f.key}" ${cur ? "checked" : ""}${isDirty(f.key) ? ' class="dirty"' : ""}>
           <span class="isotxt"><b>${esc(f.label)}</b>${f.sub ? `<span class="isosub">${esc(f.sub)}</span>` : ""}</span></label>`;
     }
     const presets = (f.presets || []).map(([lbl, v]) =>
@@ -248,7 +298,7 @@
         ${presets ? `<div class="presetrow">${presets}</div>` : ""}
         <div class="raterow">
           ${sliderHtml}
-          <input type="number" min="${f.min || 0}" max="${f.max || 999999}" value="${cur}" data-iso="${f.key}" data-def="${cur}" class="rateinput">
+          <input type="number" min="${f.min || 0}" max="${f.max || 999999}" value="${cur}" data-iso="${f.key}" data-def="${cur}" class="rateinput${isDirty(f.key) ? " dirty" : ""}">
           <span class="ratetag" data-ratetag="${f.key}">${esc(rateTag(cur))}</span>
         </div>
         ${f.hint ? `<div class="fnote ratefnote">${esc(f.hint)}</div>` : ""}</div>`;
@@ -280,6 +330,7 @@
       sliders().forEach((sl) => { const v = Math.min(+sl.max, Math.max(+sl.min, +el.value || 0)); if (+sl.value !== v) sl.value = v; });
       if (f.type !== "bool") highlight();
       syncEnable();
+      refreshViewTabs();
     };
     el.onchange = el.oninput = commit;
     sliders().forEach((sl) => (sl.oninput = () => { el.value = sl.value; commit(); }));
