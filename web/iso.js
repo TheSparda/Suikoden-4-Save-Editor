@@ -76,6 +76,10 @@
   // ---- state ------------------------------------------------------------------
   let isoHandle = null, isoName = "", isoFile = null;
   let WINDOWS = {};        // key -> {off, len, buf, orig, dv, odv}
+  // Undo journal (#3). Entries carry the affected window's bytes before and after the write, so
+  // undo is a byte restore rather than a recomputation — exact even for derived displays like the
+  // encounter-rate percentage, which is a division of the stored threshold.
+  const JOURNAL = S4Core.createJournal({ onChange: () => refreshUndoButtons() });
   let inited = false, saveNudged = false;
 
   const win = (k) => WINDOWS[k];
@@ -127,6 +131,7 @@
       wins[f.key] = { off: f.off, len: f.len, buf: bytes, orig: bytes.slice(), dv: new DataView(bytes.buffer), odv: new DataView(bytes.slice().buffer) };
     }
     WINDOWS = wins; isoHandle = handle; isoFile = file; isoName = file.name || "Suikoden IV.iso";
+    JOURNAL.reset();                      // a newly opened disc has no history to unwind
     saveNudged = false;
     if (handle) idbSet("lastIso", { name: isoName, handle, at: Date.now() }).catch(() => {});
     render();
@@ -228,13 +233,30 @@
           ${mode === "none"
             ? `<span class="status warn">Open on desktop Chromium or Android Chrome to write the ISO. Meanwhile, use “Copy pnach line”.</span>`
             : `<button class="primary" id="isoSave">${mode === "stream" ? "Save patched copy" : "Save to ISO"}</button>
+               <button id="isoUndo" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↶</button>
+               <button id="isoRedo" title="Redo (Shift+Ctrl/Cmd+Z)" aria-label="Redo">↷</button>
                <button id="isoReset">Reset</button>
                <span class="status" id="isoStatus"></span>`}
         </div>
       </div>`;
 
     const sv = $("#isoSave"); if (sv) sv.onclick = save;
-    const rs = $("#isoReset"); if (rs) rs.onclick = () => { for (const k in WINDOWS) WINDOWS[k].buf.set(WINDOWS[k].orig); render(); };
+    const rs = $("#isoReset"); if (rs) rs.onclick = () => {
+      // Reset is itself undoable — it is the single most destructive button here.
+      const before = {}, after = {};
+      for (const k in WINDOWS) { before[k] = WINDOWS[k].buf.slice(); after[k] = WINDOWS[k].orig.slice(); }
+      if (!anyDirty()) return;
+      for (const k in WINDOWS) WINDOWS[k].buf.set(WINDOWS[k].orig);
+      JOURNAL.record({
+        label: "Reset all",
+        undo: () => { for (const k in before) WINDOWS[k].buf.set(before[k]); drawView(); },
+        redo: () => { for (const k in after) WINDOWS[k].buf.set(after[k]); drawView(); },
+      });
+      drawView();
+    };
+    const uu = $("#isoUndo"); if (uu) uu.onclick = () => JOURNAL.undo();
+    const ur = $("#isoRedo"); if (ur) ur.onclick = () => JOURNAL.redo();
+    refreshUndoButtons();
     $("#isoPnach").onclick = copyPnach;
     drawView();
   }
@@ -252,6 +274,7 @@
     v[2](host);
     FIELDS.forEach(wireField);   // no-ops for fields the active tab didn't render
     syncEnable();
+    refreshUndoButtons();
   }
 
   // The per-tab count of staged edits. Redrawn on every commit as well as on a tab switch —
@@ -269,6 +292,12 @@
       try { localStorage.setItem(VIEW_KEY, VIEW); } catch (e) {}
       drawView();
     }));
+  }
+
+  function refreshUndoButtons() {
+    const u = $("#isoUndo"), r = $("#isoRedo");
+    if (u) { u.disabled = !JOURNAL.canUndo(); u.title = JOURNAL.canUndo() ? `Undo ${JOURNAL.undoLabel()} (Ctrl/Cmd+Z)` : "Nothing to undo"; }
+    if (r) { r.disabled = !JOURNAL.canRedo(); r.title = JOURNAL.canRedo() ? `Redo ${JOURNAL.redoLabel()} (Shift+Ctrl/Cmd+Z)` : "Nothing to redo"; }
   }
 
   function drawEncounters(host) {
@@ -322,8 +351,17 @@
     });
     // slider, number box, and presets all funnel through this one commit
     const commit = () => {
+      const before = w.buf.slice();
       if (f.type === "bool") f.write(w.dv, el.checked ? 1 : 0);
       else f.write(w.dv, +el.value || f.def);
+      if (before.some((b, i) => b !== w.buf[i])) {
+        const after = w.buf.slice();
+        JOURNAL.record({
+          key: f.key, label: f.label,
+          undo: () => { w.buf.set(before); drawView(); },
+          redo: () => { w.buf.set(after); drawView(); },
+        });
+      }
       el.classList && el.classList.toggle("dirty", isDirty(f.key));
       const tag = document.querySelector(`[data-ratetag="${f.key}"]`);
       if (tag) tag.textContent = rateTag(el.value);
@@ -333,6 +371,7 @@
       refreshViewTabs();
     };
     el.onchange = el.oninput = commit;
+    el.onblur = () => JOURNAL.seal();     // two visits to one box are two edits, however fast
     sliders().forEach((sl) => (sl.oninput = () => { el.value = sl.value; commit(); }));
     document.querySelectorAll(`[data-preset="${f.key}"]`).forEach((b) => (b.onclick = () => { el.value = b.dataset.pv; commit(); }));
   }
@@ -514,5 +553,5 @@
   }
 
   // exposed for app.js's mode switcher
-  window.ISO = { init };
+  window.ISO = { init, undo: () => JOURNAL.undo(), redo: () => JOURNAL.redo(), loaded: () => !!Object.keys(WINDOWS).length };
 })();

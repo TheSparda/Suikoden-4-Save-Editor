@@ -258,6 +258,38 @@ async function pickupSharedFile() {
 // so the review list and the write are minimal.
 let CE, NAMES, SAVEDITS, SEARCH, RECRUITED_ONLY, SUB;
 
+// Undo journal (#3). Every staged mutation is wrapped by staged(), which snapshots the three
+// overlays either side of the change and records the pair.
+//
+// Snapshots rather than hand-written inverse operations, deliberately: the overlays are small
+// plain objects, and there are a dozen mutation sites today with many more coming in Phases 3
+// and 6. Writing a correct inverse per site is how undo rots — miss one and the stack desyncs
+// silently. This way "undo back to zero leaves nothing staged" holds by construction, which is
+// exactly what the acceptance criterion asks for.
+const JOURNAL = S4Core.createJournal({ onChange: () => { refreshDirty(); refreshUndoButtons(); } });
+const snapStaged = () => JSON.stringify({ c: CE, n: NAMES, s: SAVEDITS });
+function restoreStaged(snap) {
+  const o = JSON.parse(snap);
+  CE = o.c; NAMES = o.n; SAVEDITS = o.s;
+  drawSlot(true);
+}
+// Run a mutation and record it. A mutation that changes nothing records nothing, so undo never
+// has a step that appears to do nothing.
+function staged(label, key, fn) {
+  const before = snapStaged();
+  fn();
+  const after = snapStaged();
+  if (before !== after) {
+    JOURNAL.record({ label, key, undo: () => restoreStaged(before), redo: () => restoreStaged(after) });
+  }
+  refreshDirty();
+}
+function refreshUndoButtons() {
+  const u = $("#undoBtn"), r = $("#redoBtn");
+  if (u) { u.disabled = !JOURNAL.canUndo(); u.title = JOURNAL.canUndo() ? `Undo ${JOURNAL.undoLabel()} (Ctrl/Cmd+Z)` : "Nothing to undo"; }
+  if (r) { r.disabled = !JOURNAL.canRedo(); r.title = JOURNAL.canRedo() ? `Redo ${JOURNAL.redoLabel()} (Shift+Ctrl/Cmd+Z)` : "Nothing to redo"; }
+}
+
 function renderEditor() {
   const ed = $("#editor");
   const slotBar = saves.length > 1
@@ -270,9 +302,15 @@ function renderEditor() {
   drawSlot();
 }
 
-function drawSlot() {
+// keepStaged: repaint from the current overlay instead of resetting it. Undo/redo and #4's
+// restore need a repaint that preserves staged state; loading a slot needs one that clears it.
+function drawSlot(keepStaged) {
   const s = saves[curSlot];
-  CE = {}; NAMES = {}; SAVEDITS = {}; SEARCH = ""; RECRUITED_ONLY = false; SUB = "chars";
+  if (!keepStaged) {
+    CE = {}; NAMES = {}; SAVEDITS = {}; SEARCH = ""; RECRUITED_ONLY = false; SUB = "chars";
+    OPEN_CHARS.clear();
+    JOURNAL.reset();
+  }
 
   const cksum = s.checksumValid ? `<span class="pill on">checksum ok</span>` : `<span class="pill">checksum off</span>`;
   const metaBits = [
@@ -282,10 +320,12 @@ function drawSlot() {
     s.container && s.container !== "memcard" ? `${esc(s.container.toUpperCase())} container` : null,
   ].filter(Boolean).join(" · ");
 
-  const names = (s.names || []).map((n) =>
-    `<label class="field"><span>${esc(n.label)}</span>
-       <input type="text" maxlength="${n.max}" value="${esc(n.value || "")}"
-              data-name="${esc(n.key)}" data-def="${esc(n.value || "")}"></label>`).join("");
+  const names = (s.names || []).map((n) => {
+    const val = n.key in NAMES ? NAMES[n.key] : (n.value || "");
+    return `<label class="field"><span>${esc(n.label)}</span>
+       <input type="text" maxlength="${n.max}" value="${esc(val)}" class="${dz(val, n.value || "").trim()}"
+              data-name="${esc(n.key)}" data-def="${esc(n.value || "")}"></label>`;
+  }).join("");
 
   if (saves.length > 1) {
     const sm = $("#slotmeta");
@@ -309,13 +349,15 @@ function drawSlot() {
       <div class="grid">
         <label class="field"><span>Potch <button type="button" class="chip mini" id="maxPotch">max</button></span>
           <input type="number" min="0" max="99999999" id="potchfld"
-                 value="${s.potch || 0}" data-def="${s.potch || 0}"></label>
-        <label class="field"><span>Game time (seconds) — <span id="gtlabel">${gtLabel(s.gameTimeSec)}</span></span>
+                 value="${"potch" in SAVEDITS ? SAVEDITS.potch : (s.potch || 0)}" data-def="${s.potch || 0}"
+                 class="${dz("potch" in SAVEDITS ? SAVEDITS.potch : (s.potch || 0), s.potch || 0).trim()}"></label>
+        <label class="field"><span>Game time (seconds) — <span id="gtlabel">${gtLabel("gameTime" in SAVEDITS ? SAVEDITS.gameTime : s.gameTimeSec)}</span></span>
           <input type="number" min="0" max="3596400" id="gtfld"
-                 value="${s.gameTimeSec || 0}" data-def="${s.gameTimeSec || 0}"></label>
+                 value="${"gameTime" in SAVEDITS ? SAVEDITS.gameTime : (s.gameTimeSec || 0)}" data-def="${s.gameTimeSec || 0}"
+                 class="${dz("gameTime" in SAVEDITS ? SAVEDITS.gameTime : (s.gameTimeSec || 0), s.gameTimeSec || 0).trim()}"></label>
         <div class="field"><span>World map (${s.worldMapPct != null ? s.worldMapPct + "% explored" : "—"})</span>
           <label class="row" style="gap:6px;cursor:pointer;min-height:38px">
-            <input type="checkbox" id="wmfull"> mark fully explored on write</label></div>
+            <input type="checkbox" id="wmfull"${SAVEDITS.worldMapFull ? " checked" : ""}> mark fully explored on write</label></div>
       </div>
     </div>
     <div class="card">
@@ -334,33 +376,44 @@ function drawSlot() {
                  <button id="saveBtn">Download copy</button>`
               : `<button class="primary" id="saveBtn">Apply &amp; download</button>`) +
             (CAN_SHARE_FILES ? `<button id="shareBtn">Apply &amp; share…</button>` : "") +
-            `<button id="resetBtn">Reset</button>
+            `<button id="undoBtn" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↶</button>
+             <button id="redoBtn" title="Redo (Shift+Ctrl/Cmd+Z)" aria-label="Redo">↷</button>
+             <button id="resetBtn">Reset</button>
              <span class="badge hidden" id="dirtyBadge">0 unsaved</span>
              <span class="status" id="status"></span>`}
       </div>
     </div>`;
 
   // wire names + money/time (Overview card is always visible)
-  $$("input[data-name]").forEach((inp) => (inp.oninput = () => {
-    inp.classList.toggle("dirty", inp.value !== inp.dataset.def);
-    NAMES[inp.dataset.name] = inp.value; refreshDirty();
-  }));
-  const potch = $("#potchfld"); if (potch) potch.oninput = () => {
-    potch.classList.toggle("dirty", potch.value !== potch.dataset.def);
-    SAVEDITS.potch = +potch.value; refreshDirty();
-  };
-  const maxP = $("#maxPotch"); if (maxP && potch) maxP.onclick = () => {
+  $$("input[data-name]").forEach((inp) => {
+    inp.oninput = () => staged(inp.previousElementSibling?.textContent || "Name", `name:${inp.dataset.name}`, () => {
+      inp.classList.toggle("dirty", inp.value !== inp.dataset.def);
+      NAMES[inp.dataset.name] = inp.value;
+    });
+    inp.onblur = () => JOURNAL.seal();
+  });
+  const potch = $("#potchfld"); if (potch) {
+    potch.oninput = () => staged("Potch", "potch", () => {
+      potch.classList.toggle("dirty", potch.value !== potch.dataset.def);
+      SAVEDITS.potch = +potch.value;
+    });
+    potch.onblur = () => JOURNAL.seal();
+  }
+  const maxP = $("#maxPotch"); if (maxP && potch) maxP.onclick = () => staged("Potch → max", null, () => {
     potch.value = POTCH_MAX; potch.classList.toggle("dirty", String(POTCH_MAX) !== potch.dataset.def);
-    SAVEDITS.potch = POTCH_MAX; refreshDirty();
-  };
-  const gt = $("#gtfld"); if (gt) gt.oninput = () => {
-    gt.classList.toggle("dirty", gt.value !== gt.dataset.def);
-    SAVEDITS.gameTime = +gt.value; $("#gtlabel").textContent = gtLabel(+gt.value); refreshDirty();
-  };
-  const wm = $("#wmfull"); if (wm) wm.onchange = () => {
+    SAVEDITS.potch = POTCH_MAX;
+  });
+  const gt = $("#gtfld"); if (gt) {
+    gt.oninput = () => staged("Game time", "gameTime", () => {
+      gt.classList.toggle("dirty", gt.value !== gt.dataset.def);
+      SAVEDITS.gameTime = +gt.value; $("#gtlabel").textContent = gtLabel(+gt.value);
+    });
+    gt.onblur = () => JOURNAL.seal();
+  }
+  const wm = $("#wmfull"); if (wm) wm.onchange = () => staged("World map fully explored", null, () => {
     if (wm.checked) SAVEDITS.worldMapFull = 1; else delete SAVEDITS.worldMapFull;
-    wm.closest(".field")?.classList.toggle("dirty-soft", wm.checked); refreshDirty();
-  };
+    wm.closest(".field")?.classList.toggle("dirty-soft", wm.checked);
+  });
 
   // subtabs + search + toolbar
   $$("[data-sub]").forEach((b) => (b.onclick = () => { SUB = b.dataset.sub; SEARCH = ""; const q = $("#sq"); if (q) q.value = ""; showSub(); }));
@@ -368,7 +421,10 @@ function drawSlot() {
   const sb = $("#saveBtn"); if (sb) sb.onclick = () => applyEdits("download");
   const sfb = $("#saveFileBtn"); if (sfb) sfb.onclick = () => applyEdits("file");
   const shb = $("#shareBtn"); if (shb) shb.onclick = () => applyEdits("share");
-  const rb = $("#resetBtn"); if (rb) rb.onclick = drawSlot;
+  const rb = $("#resetBtn"); if (rb) rb.onclick = () => drawSlot();
+  const ub = $("#undoBtn"); if (ub) ub.onclick = () => JOURNAL.undo();
+  const rdb = $("#redoBtn"); if (rdb) rdb.onclick = () => JOURNAL.redo();
+  refreshUndoButtons();
   showSub();
 }
 
@@ -393,6 +449,12 @@ function charByRoster(ri) { return saves[curSlot].characters.find((c) => c.roste
 // staged recruitment value for a character (falls back to the loaded value)
 function recOf(c) { const e = CE[c.rosterIndex]; return (e && "recruited" in e) ? e.recruited : c.recruited; }
 
+// Which character cards are expanded. Keyed by roster index rather than element identity so a
+// re-render can't collapse them — undo/redo repaints the whole list, and having the card you are
+// working in snap shut on every undo makes the feature unusable. (Same trap #6 records for
+// blurb cards: key open state by something that outlives the element.)
+const OPEN_CHARS = new Set();
+
 function drawChars() {
   const s = saves[curSlot];
   let pool = s.characters || [];
@@ -409,11 +471,11 @@ function drawRecruit() {
   const shown = (s.characters || []).filter((c) => !SEARCH || c.name.toLowerCase().includes(SEARCH) || String(c.rosterIndex) === SEARCH);
   const rows = shown.map((c) => {
     const cur = recOf(c);
-    const staged = CE[c.rosterIndex] && "recruited" in CE[c.rosterIndex] && CE[c.rosterIndex].recruited !== c.recruited;
+    const isStaged = CE[c.rosterIndex] && "recruited" in CE[c.rosterIndex] && CE[c.rosterIndex].recruited !== c.recruited;
     const unrec = (cur || 0) === 0;
     const opts = REC_STATES.map(([v, l]) => `<option value="${v}"${v === cur ? " selected" : ""}>${l}</option>`).join("") +
       (REC_STATES.some(([v]) => v === cur) ? "" : `<option value="${cur}" selected>? (${cur})</option>`);
-    return `<tr class="${staged ? "dirtyrow" : ""}${unrec ? " unrec" : ""}">
+    return `<tr class="${isStaged ? "dirtyrow" : ""}${unrec ? " unrec" : ""}">
         <td>${esc(c.name)}</td><td class="sl">#${c.rosterIndex}</td>
         <td><select data-recrow="${c.rosterIndex}" style="max-width:210px">${opts}</select></td></tr>`;
   }).join("") || `<tr><td colspan="3" class="muted">no matching characters</td></tr>`;
@@ -422,10 +484,11 @@ function drawRecruit() {
      <table class="invtbl"><thead><tr><th>Character</th><th>#</th><th>Recruitment</th></tr></thead><tbody>${rows}</tbody></table>`;
   $$("select[data-recrow]").forEach((se) => (se.onchange = () => {
     const c = charByRoster(+se.dataset.recrow); if (!c) return;
-    ce(c.rosterIndex).recruited = +se.value;
-    const tr = se.closest("tr");
-    if (tr) { tr.classList.toggle("dirtyrow", +se.value !== c.recruited); tr.classList.toggle("unrec", +se.value === 0); }
-    refreshDirty();
+    staged(`${c.name} · Recruitment`, null, () => {
+      ce(c.rosterIndex).recruited = +se.value;
+      const tr = se.closest("tr");
+      if (tr) { tr.classList.toggle("dirtyrow", +se.value !== c.recruited); tr.classList.toggle("unrec", +se.value === 0); }
+    });
   }));
 }
 
@@ -433,31 +496,36 @@ function charCard(c) {
   const ri = c.rosterIndex;
   const rcur = recOf(c);
   const unrec = (rcur || 0) === 0;
-  const num = (k, val, max) =>
-    `<input type="number" min="0" max="${max}" value="${val}" data-ri="${ri}" data-k="${k}" data-def="${val}" title="0–${max}">`;
-  const stat = (n) =>
-    `<label class="field"><span>${n}</span><input type="number" min="0" max="999" value="${c.stats[n]}" data-ri="${ri}" data-stat="${n}" data-def="${c.stats[n]}"></label>`;
+  // value = staged-or-file, data-def = always the file's, so dirty/restore stay honest.
+  const num = (k, max) => {
+    const file = c[k] || 0, val = curK(c, k) || 0;
+    return `<input type="number" min="0" max="${max}" value="${val}" data-ri="${ri}" data-k="${k}" data-def="${file}" class="${dz(val, file).trim()}" title="0–${max}">`;
+  };
+  const stat = (n) => {
+    const file = c.stats[n], val = curStat(c, n);
+    return `<label class="field"><span>${n}</span><input type="number" min="0" max="999" value="${val}" data-ri="${ri}" data-stat="${n}" data-def="${file}" class="${dz(val, file).trim()}"></label>`;
+  };
 
-  const lv = lvFromExp(c.exp);
+  const lv = lvFromExp(curK(c, "exp")), lvFile = lvFromExp(c.exp);
   const core = `
     <label class="field"><span>Level</span>
-      <input type="number" min="1" max="99" value="${lv}" data-lv="${ri}" data-def="${lv}" title="writes EXP = (Lv−1)×1000"></label>
-    <label class="field"><span>EXP</span>${num("exp", c.exp || 0, CHAR_CAP.exp)}</label>
-    <label class="field"><span>Weapon Lv</span>${num("weaponLvl", c.weaponLvl || 0, CHAR_CAP.weaponLvl)}</label>
-    <label class="field"><span>Max HP</span>${num("maxHP", c.maxHP, CHAR_CAP.maxHP)}</label>`;
+      <input type="number" min="1" max="99" value="${lv}" data-lv="${ri}" data-def="${lvFile}" class="${dz(lv, lvFile).trim()}" title="writes EXP = (Lv−1)×1000"></label>
+    <label class="field"><span>EXP</span>${num("exp", CHAR_CAP.exp)}</label>
+    <label class="field"><span>Weapon Lv</span>${num("weaponLvl", CHAR_CAP.weaponLvl)}</label>
+    <label class="field"><span>Max HP</span>${num("maxHP", CHAR_CAP.maxHP)}</label>`;
 
   const stats = STAT_NAMES.map(stat).join("");
 
   const runes = [0, 1, 2].map((slot) => {
-    const cur = c.runes[slot] || 0;
+    const file = c.runes[slot] || 0, cur = curRune(c, slot);
     return `<label class="field"><span>Rune ${slot + 1}</span>
-      <button type="button" class="picker" data-runeri="${ri}" data-runeslot="${slot}" data-val="${cur}" data-def="${cur}">${esc(runeLabel(cur))}</button></label>`;
+      <button type="button" class="picker${dz(cur, file)}" data-runeri="${ri}" data-runeslot="${slot}" data-val="${cur}" data-def="${file}">${esc(runeLabel(cur))}</button></label>`;
   }).join("");
 
   const equip = EQUIP_SLOTS.map(([key]) => {
-    const cur = (c.equip || {})[key] || 0;
+    const file = (c.equip || {})[key] || 0, cur = curEquip(c, key);
     return `<label class="field"><span>${GEAR_LABELS[key] || key}</span>
-      <button type="button" class="picker" data-eqri="${ri}" data-eq="${key}" data-val="${cur}" data-def="${cur}">${esc(itemLabel(cur))}</button></label>`;
+      <button type="button" class="picker${dz(cur, file)}" data-eqri="${ri}" data-eq="${key}" data-val="${cur}" data-def="${file}">${esc(itemLabel(cur))}</button></label>`;
   }).join("");
 
   const uNames = c.uniteNames || {};
@@ -465,7 +533,7 @@ function charCard(c) {
     ? `<h4>Unite attacks <span class="muted" style="text-transform:none;letter-spacing:0">(level 0–3)</span></h4>
        <div class="grid sk">${Object.entries(uNames).map(([slot, u]) =>
         `<label class="field" title="${esc(u.with || "")}"><span>${esc(u.name)}</span>
-          <input type="number" min="0" max="3" value="${(c.unites || [])[+slot] || 0}" data-uri="${ri}" data-uslot="${slot}" data-def="${(c.unites || [])[+slot] || 0}"></label>`).join("")}</div>`
+          <input type="number" min="0" max="3" value="${curUnite(c, slot)}" data-uri="${ri}" data-uslot="${slot}" data-def="${(c.unites || [])[+slot] || 0}" class="${dz(curUnite(c, slot), (c.unites || [])[+slot] || 0).trim()}"></label>`).join("")}</div>`
     : "";
 
   const recOpts = REC_STATES.map(([v, l]) => `<option value="${v}"${v === rcur ? " selected" : ""}>${l}</option>`).join("") +
@@ -477,14 +545,14 @@ function charCard(c) {
       `<span class="aff a${v}" title="${AFF_ELEMS[i]} — ${AFF_RATE[v]}">${AFF_ELEMS[i]} ${v}</span>`).join(" · ")}
       <span class="muted">(1 poor–4 excellent · GameFAQs affinity FAQ)</span></div>` : "";
 
-  return `<details class="char${unrec ? " unrec" : ""}"><summary>
+  return `<details class="char${unrec ? " unrec" : ""}"${OPEN_CHARS.has(ri) ? " open" : ""}><summary>
       <span class="chev">▸</span><span class="nm">${esc(c.name)}</span>
       <span class="muted">#${ri}</span>
       <span class="pill${(rcur || 0) >= 10 ? " on" : ""}">${esc(recName(rcur))}</span>
-      <span class="lv">Lv ${lv} · HP ${c.maxHP}</span></summary>
+      <span class="lv">Lv ${lv} · HP ${curK(c, "maxHP")}</span></summary>
     <div class="char-body" data-roster="${ri}">
       <div class="row" style="gap:8px;margin:6px 0 2px"><span class="muted">Recruitment</span>
-        <select data-recruit="${ri}" style="max-width:220px">${recOpts}</select></div>
+        <select data-recruit="${ri}" class="${dz(rcur, c.recruited).trim()}" style="max-width:220px">${recOpts}</select></div>
       <div class="row presets" style="gap:6px;margin:6px 0 2px"><span class="muted">Preset</span>
         <button type="button" class="chip mini" data-preset="${ri}" title="stage max stats, HP, level, weapon Lv and all unites for review">★ Max out</button></div>
       <h4>Core</h4><div class="grid">${core}</div>
@@ -498,58 +566,86 @@ function charCard(c) {
 
 function ce(ri) { return (CE[ri] = CE[ri] || {}); }
 
+// What a field should *display*: the staged value when one exists, otherwise the file's.
+// data-def always keeps the file's value, so the dirty comparison — and #4's per-field restore —
+// stay honest. Before #3 the cards rendered straight from the file and the staged value lived
+// only in the DOM, which meant any re-render silently discarded what you had typed.
+function curK(c, k)      { const e = CE[c.rosterIndex]; return e && k in e ? e[k] : c[k]; }
+function curStat(c, n)   { const e = CE[c.rosterIndex]; return e && e.stats && n in e.stats ? e.stats[n] : c.stats[n]; }
+function curRune(c, sl)  { const e = CE[c.rosterIndex]; return e && e.runes && sl in e.runes ? e.runes[sl] : (c.runes[sl] || 0); }
+function curEquip(c, k)  { const e = CE[c.rosterIndex]; return e && e.equip && k in e.equip ? e.equip[k] : ((c.equip || {})[k] || 0); }
+function curUnite(c, sl) { const e = CE[c.rosterIndex]; return e && e.unites && sl in e.unites ? e.unites[sl] : ((c.unites || [])[+sl] || 0); }
+const dz = (a, b) => (String(a) !== String(b) ? " dirty" : "");   // dirty class when staged ≠ file
+
 function wireChar(c) {
   const ri = c.rosterIndex;
   const body = $(`.char-body[data-roster="${ri}"]`);
   if (!body) return;
+  const card = body.closest("details.char");
+  if (card) card.ontoggle = () => (card.open ? OPEN_CHARS.add(ri) : OPEN_CHARS.delete(ri));
   // numeric core + stats
-  $$("input[data-k]", body).forEach((inp) => (inp.onchange = () => {
-    ce(ri)[inp.dataset.k] = +inp.value;
-    inp.classList.toggle("dirty", inp.value !== inp.dataset.def);
-    if (inp.dataset.k === "exp") { const lvIn = $(`input[data-lv="${ri}"]`, body); if (lvIn) lvIn.value = lvFromExp(+inp.value); }
-    refreshDirty();
-  }));
-  $$("input[data-stat]", body).forEach((inp) => (inp.onchange = () => {
-    (ce(ri).stats = ce(ri).stats || {})[inp.dataset.stat] = +inp.value;
-    inp.classList.toggle("dirty", inp.value !== inp.dataset.def); refreshDirty();
-  }));
+  $$("input[data-k]", body).forEach((inp) => {
+    inp.onchange = () => staged(`${c.name} · ${inp.dataset.k}`, `ce:${ri}:${inp.dataset.k}`, () => {
+      ce(ri)[inp.dataset.k] = +inp.value;
+      inp.classList.toggle("dirty", inp.value !== inp.dataset.def);
+      if (inp.dataset.k === "exp") { const lvIn = $(`input[data-lv="${ri}"]`, body); if (lvIn) lvIn.value = lvFromExp(+inp.value); }
+    });
+    inp.onblur = () => JOURNAL.seal();
+  });
+  $$("input[data-stat]", body).forEach((inp) => {
+    inp.onchange = () => staged(`${c.name} · ${inp.dataset.stat}`, `ce:${ri}:stat:${inp.dataset.stat}`, () => {
+      (ce(ri).stats = ce(ri).stats || {})[inp.dataset.stat] = +inp.value;
+      inp.classList.toggle("dirty", inp.value !== inp.dataset.def);
+    });
+    inp.onblur = () => JOURNAL.seal();
+  });
   // level → drives EXP
   const lvIn = $(`input[data-lv="${ri}"]`, body);
-  if (lvIn) lvIn.oninput = () => {
-    const exp = expFromLv(+lvIn.value);
-    const expIn = $(`input[data-k="exp"]`, body);
-    if (expIn) { expIn.value = exp; expIn.classList.toggle("dirty", String(exp) !== expIn.dataset.def); }
-    ce(ri).exp = exp;
-    lvIn.classList.toggle("dirty", lvIn.value !== lvIn.dataset.def); refreshDirty();
-  };
+  if (lvIn) {
+    lvIn.oninput = () => staged(`${c.name} · Level`, `ce:${ri}:exp`, () => {
+      const exp = expFromLv(+lvIn.value);
+      const expIn = $(`input[data-k="exp"]`, body);
+      if (expIn) { expIn.value = exp; expIn.classList.toggle("dirty", String(exp) !== expIn.dataset.def); }
+      ce(ri).exp = exp;
+      lvIn.classList.toggle("dirty", lvIn.value !== lvIn.dataset.def);
+    });
+    lvIn.onblur = () => JOURNAL.seal();
+  }
   // runes
   $$("button.picker[data-runeri]", body).forEach((btn) => (btn.onclick = () => {
     const slot = +btn.dataset.runeslot, cur = +btn.dataset.val;
     openPicker(`Rune ${slot + 1}`, REF.runes, cur, (id) => {
-      btn.dataset.val = id; btn.textContent = runeLabel(id);
-      btn.classList.toggle("dirty", String(id) !== btn.dataset.def);
-      (ce(ri).runes = ce(ri).runes || {})[slot] = id; refreshDirty();
+      staged(`${c.name} · Rune ${slot + 1}`, null, () => {
+        btn.dataset.val = id; btn.textContent = runeLabel(id);
+        btn.classList.toggle("dirty", String(id) !== btn.dataset.def);
+        (ce(ri).runes = ce(ri).runes || {})[slot] = id;
+      });
     }, (id) => hx(id, 2));
   }));
   // equipment
   $$("button.picker[data-eq]", body).forEach((btn) => (btn.onclick = () => {
     const key = btn.dataset.eq, cur = +btn.dataset.val;
     openPicker(`Equip — ${GEAR_LABELS[key] || key}`, REF.items, cur, (id) => {
-      btn.dataset.val = id; btn.textContent = itemLabel(id);
-      btn.classList.toggle("dirty", String(id) !== btn.dataset.def);
-      (ce(ri).equip = ce(ri).equip || {})[key] = id; refreshDirty();
+      staged(`${c.name} · ${GEAR_LABELS[key] || key}`, null, () => {
+        btn.dataset.val = id; btn.textContent = itemLabel(id);
+        btn.classList.toggle("dirty", String(id) !== btn.dataset.def);
+        (ce(ri).equip = ce(ri).equip || {})[key] = id;
+      });
     });
   }));
   // unites
-  $$("input[data-uri]", body).forEach((inp) => (inp.onchange = () => {
-    (ce(ri).unites = ce(ri).unites || {})[inp.dataset.uslot] = +inp.value;
-    inp.classList.toggle("dirty", inp.value !== inp.dataset.def); refreshDirty();
-  }));
+  $$("input[data-uri]", body).forEach((inp) => {
+    inp.onchange = () => staged(`${c.name} · Unite`, `ce:${ri}:unite:${inp.dataset.uslot}`, () => {
+      (ce(ri).unites = ce(ri).unites || {})[inp.dataset.uslot] = +inp.value;
+      inp.classList.toggle("dirty", inp.value !== inp.dataset.def);
+    });
+    inp.onblur = () => JOURNAL.seal();
+  });
   // recruitment
-  $$("select[data-recruit]", body).forEach((se) => (se.onchange = () => {
+  $$("select[data-recruit]", body).forEach((se) => (se.onchange = () => staged(`${c.name} · Recruitment`, null, () => {
     ce(ri).recruited = +se.value;
-    se.classList.toggle("dirty", +se.value !== c.recruited); refreshDirty();
-  }));
+    se.classList.toggle("dirty", +se.value !== c.recruited);
+  })));
   // preset
   $$("button[data-preset]", body).forEach((b) => (b.onclick = () => applyPreset(ri)));
 }
@@ -558,6 +654,10 @@ function wireChar(c) {
 function applyPreset(ri) {
   const body = $(`.char-body[data-roster="${ri}"]`);
   if (!body) return;
+  // One undo step for the whole preset — unwinding "Max out" field by field would be useless.
+  staged(`Max out · ${charByRoster(ri)?.name || "#" + ri}`, null, () => applyPresetInner(ri, body));
+}
+function applyPresetInner(ri, body) {
   const e = ce(ri);
   const mark = (inp, v) => { inp.value = v; inp.classList.toggle("dirty", String(v) !== inp.dataset.def); };
   e.stats = e.stats || {};
@@ -567,7 +667,6 @@ function applyPreset(ri) {
   const lvIn = $(`input[data-lv="${ri}"]`, body); if (lvIn) mark(lvIn, 99);
   const us = $$('input[data-uri]', body);
   if (us.length) { e.unites = e.unites || {}; us.forEach((inp) => { mark(inp, 3); e.unites[inp.dataset.uslot] = 3; }); }
-  refreshDirty();
   setStatus(`Staged "Max out" for ${charByRoster(ri)?.name || "#" + ri} — review before applying.`, "");
 }
 
@@ -761,6 +860,25 @@ function showUpdatePrompt(latest) {
 }
 
 // ---- theme -----------------------------------------------------------------
+// Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z, routed to the editor the user is actually looking at.
+// Skipped while a text field has focus so the browser's own per-field undo still works, and
+// while a modal is open so Esc/Enter keep their meaning.
+function bindUndoKeys() {
+  document.addEventListener("keydown", (e) => {
+    const z = (e.key === "z" || e.key === "Z") && (e.metaKey || e.ctrlKey) && !e.altKey;
+    if (!z) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (document.querySelector(".modal-ov")) return;
+    const iso = MODE === "iso";
+    if (iso && !(window.ISO && window.ISO.loaded && window.ISO.loaded())) return;
+    e.preventDefault();
+    const back = !e.shiftKey;
+    if (iso) (back ? window.ISO.undo : window.ISO.redo)();
+    else (back ? JOURNAL.undo : JOURNAL.redo)();
+  });
+}
+
 function applyTheme(t) {
   document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "");
   $$("footer .tb").forEach((b) => b.classList.toggle("on", b.dataset.theme === t));
@@ -770,7 +888,9 @@ function applyTheme(t) {
 }
 
 // ---- mode tabs -------------------------------------------------------------
+let MODE = "save";              // which editor is showing — the undo keys route on this
 function setMode(mode) {
+  MODE = mode;
   $$(".modebar .mtab").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
   $("#mode-save").classList.toggle("hidden", mode !== "save");
   $("#mode-iso").classList.toggle("hidden", mode !== "iso");
@@ -784,6 +904,7 @@ window.addEventListener("DOMContentLoaded", () => {
   let theme = "ocean";
   try { theme = localStorage.getItem("s4editor-theme") || "ocean"; } catch (e) {}
   applyTheme(theme);
+  bindUndoKeys();
   // Show the version of the *running* code (app.js), not whatever index.html shipped — so a
   // transient cache desync can never make the footer disagree with the update banner.
   const cr = $("footer .credit"); if (cr) cr.innerHTML = cr.innerHTML.replace(/·\s*v[\d.]+/, "· v" + APP_VERSION);

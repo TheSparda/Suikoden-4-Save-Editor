@@ -152,6 +152,25 @@ const hostIdx = iso.indexOf('<div id="isoViewHost">'), saveIdx = iso.indexOf('id
   ? ok : bad)("the active tab is persisted to localStorage");
 (/VIEWS\.some\(\(\[k\]\) => k === VIEW\)/.test(iso) ? ok : bad)("a persisted tab that no longer exists falls back to the first");
 
+// 7c) Undo/redo wiring (#3). The journal's own behaviour is covered properly in s4-core.mjs;
+// these only assert that both editors are actually plugged into it, which is the part that
+// lives in DOM code and can't be imported here.
+console.log("Undo/redo wiring (#3):");
+(/S4Core\.createJournal/.test(app) ? ok : bad)("app.js creates a journal");
+(/S4Core\.createJournal/.test(iso) ? ok : bad)("iso.js creates a journal");
+(/id="undoBtn"/.test(app) && /id="redoBtn"/.test(app) ? ok : bad)("save editor has undo/redo buttons");
+(/id="isoUndo"/.test(iso) && /id="isoRedo"/.test(iso) ? ok : bad)("ISO editor has undo/redo buttons");
+(/metaKey \|\| e\.ctrlKey/.test(app) && /bindUndoKeys/.test(app) ? ok : bad)("Ctrl/Cmd+Z is bound");
+// The staged overlay must be repaintable without being reset, or undo can restore the data and
+// still leave the old values on screen — which is what made this more than a bookkeeping change.
+(/function drawSlot\(keepStaged\)/.test(app) ? ok : bad)("drawSlot can repaint without clearing staged edits");
+(/OPEN_CHARS/.test(app) ? ok : bad)("character cards keep their open state across a repaint");
+// Mutating CE/NAMES/SAVEDITS outside staged() doesn't corrupt anything — it just doesn't get an
+// undo step. This counts the wrappers so a future edit that adds a site without one is at least
+// visible in the diff; it is a smoke check, not a proof.
+const stagedCalls = (app.match(/\bstaged\(/g) || []).length;
+(stagedCalls >= 12 ? ok : bad)(`mutation sites routed through staged(): ${stagedCalls}`);
+
 // 8) version lockstep: app.js APP_VERSION === index.html footer version (B12 corollary)
 console.log("Version lockstep:");
 const appVer = (/APP_VERSION\s*=\s*"(\d+\.\d+\.\d+)"/.exec(app) || [])[1];

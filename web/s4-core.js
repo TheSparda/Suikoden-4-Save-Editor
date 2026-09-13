@@ -145,13 +145,77 @@
     return rows;
   }
 
+  // ---- staging journal (undo / redo) ---------------------------------------
+
+  // A generic edit journal. It knows nothing about saves, discs or the DOM — a caller records a
+  // label plus the two functions that move state backwards and forwards, and this owns the
+  // stacks, the coalescing and the bounds.
+  //
+  // Both editors drive this with *snapshots* rather than hand-written inverse operations. Writing
+  // a correct inverse for every mutation is the classic way undo rots: miss one field and the
+  // stack silently desyncs from the data. Snapshotting the staged overlay costs a few KB and
+  // makes "undo back to zero leaves nothing staged" true by construction rather than by audit.
+  //
+  //   coalesceMs  consecutive records sharing a `key` inside this window collapse into one step.
+  //               Without it, typing "250" into a number box is three undo steps, and dragging a
+  //               slider is dozens. The first entry's undo is kept (it holds the oldest state)
+  //               and the latest redo replaces the newer one.
+  //   limit       oldest entries are dropped past this depth, so a long session can't grow
+  //               without bound.
+  function createJournal({ limit = 200, coalesceMs = 600, onChange = null, now = Date.now } = {}) {
+    let undoStack = [], redoStack = [];
+    const fire = () => { if (onChange) onChange(api); };
+
+    const api = {
+      // record({ label, key?, undo, redo }) — `undo`/`redo` restore state; neither is called here.
+      record({ label, key = null, undo, redo }) {
+        const top = undoStack[undoStack.length - 1];
+        if (top && key !== null && top.key === key && now() - top.at <= coalesceMs) {
+          top.redo = redo; top.at = now(); top.label = label;   // same field, still typing
+        } else {
+          undoStack.push({ label, key, undo, redo, at: now() });
+          if (undoStack.length > limit) undoStack.shift();
+        }
+        redoStack = [];          // a new edit forks the timeline; the old redo branch is gone
+        fire();
+        return api;
+      },
+      undo() {
+        const e = undoStack.pop();
+        if (!e) return false;
+        e.undo();
+        redoStack.push(e);
+        fire();
+        return true;
+      },
+      redo() {
+        const e = redoStack.pop();
+        if (!e) return false;
+        e.redo();
+        undoStack.push(e);
+        fire();
+        return true;
+      },
+      // Seals the current entry so the next record starts a fresh step even within coalesceMs.
+      // Used when focus leaves a field: two visits to the same box are two edits, however fast.
+      seal() { const top = undoStack[undoStack.length - 1]; if (top) top.key = null; return api; },
+      reset() { undoStack = []; redoStack = []; fire(); return api; },
+      canUndo: () => undoStack.length > 0,
+      canRedo: () => redoStack.length > 0,
+      undoLabel: () => (undoStack[undoStack.length - 1] || {}).label || null,
+      redoLabel: () => (redoStack[redoStack.length - 1] || {}).label || null,
+      depth: () => ({ undo: undoStack.length, redo: redoStack.length }),
+    };
+    return api;
+  }
+
   // ---- exports -------------------------------------------------------------
   // Names are attached individually so app.js keeps using them bare, and collected under S4Core
   // so the tests (and future modules) have one handle to import.
   const API = {
     REC_STATES, STAT_NAMES, GEAR_LABELS, CHAR_CAP, POTCH_MAX, LV_MAX,
     AFF_ELEMS, AFF_RATE, AFF_ALIAS,
-    lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff,
+    lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal,
   };
   Object.assign(root, API);
   root.S4Core = API;

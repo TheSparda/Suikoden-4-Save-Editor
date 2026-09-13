@@ -13,7 +13,7 @@ import { fileURLToPath } from "url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const core = createRequire(import.meta.url)(path.resolve(HERE, "..", "s4-core.js"));
 const { REC_STATES, CHAR_CAP, POTCH_MAX, LV_MAX, AFF_RATE, AFF_ALIAS,
-        lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff } = core;
+        lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal } = core;
 
 let failures = 0;
 const ok = (m) => console.log("  ✓ " + m);
@@ -168,6 +168,101 @@ is(buildDiff(), [], "called with no arguments at all, returns no rows");
 {
   const many = diff({ saveEdits: { potch: 2 }, charEdits: { 0: { maxHP: 1, weaponLvl: 1 } } });
   is(many.length, 3, "multiple edits across groups all appear");
+}
+
+// ---- staging journal ------------------------------------------------------
+console.log("Staging journal — undo/redo:");
+{
+  // A scripted edit sequence over a toy state, driven exactly the way both editors drive it:
+  // snapshot before, snapshot after, record the pair.
+  let state = { hp: 100 };
+  let clock = 1000;
+  const j = createJournal({ coalesceMs: 600, now: () => clock });
+  const set = (key, label, v) => {
+    const before = { ...state };
+    state = { ...state, hp: v };
+    const after = { ...state };
+    j.record({ key, label, undo: () => (state = before), redo: () => (state = after) });
+  };
+
+  is([j.canUndo(), j.canRedo()], [false, false], "a fresh journal has nothing to undo or redo");
+  is(j.undo(), false, "undo on an empty journal is a no-op, not a throw");
+  is(j.redo(), false, "redo on an empty journal is a no-op, not a throw");
+
+  clock = 1000; set("hp", "Max HP", 200);
+  clock = 3000; set("hp", "Max HP", 300);      // outside the window → its own step
+  is(j.depth(), { undo: 2, redo: 0 }, "two separate edits are two steps");
+  is(state.hp, 300, "state advanced");
+
+  j.undo(); is(state.hp, 200, "undo steps back one edit");
+  j.undo(); is(state.hp, 100, "undo back to the original value");
+  is(j.canUndo(), false, "nothing left to undo");
+  is(j.depth(), { undo: 0, redo: 2 }, "both edits are now redoable");
+
+  j.redo(); is(state.hp, 200, "redo replays the first edit");
+  j.redo(); is(state.hp, 300, "redo replays the second");
+  is(j.canRedo(), false, "nothing left to redo");
+
+  // Forking: a new edit after an undo discards the redo branch, as every editor does.
+  j.undo();
+  clock = 9000; set("hp", "Max HP", 999);
+  is([j.canRedo(), state.hp], [false, 999], "a new edit after undo discards the redo branch");
+}
+
+console.log("Journal — coalescing:");
+{
+  let state = 0, clock = 0;
+  const j = createJournal({ coalesceMs: 600, now: () => clock });
+  const type = (v) => {
+    const before = state, after = v;
+    state = v;
+    j.record({ key: "rate", label: "Encounter rate", undo: () => (state = before), redo: () => (state = after) });
+  };
+  // Typing "250" fires three input events in quick succession.
+  clock = 0; type(2); clock = 80; type(25); clock = 160; type(250);
+  is(j.depth().undo, 1, "a burst of typing in one field collapses to a single undo step");
+  j.undo();
+  is(state, 0, "undoing that burst returns the *original* value, not an intermediate keystroke");
+
+  // A different field never coalesces, however fast.
+  let s2 = { a: 0, b: 0 }; clock = 0;
+  const j2 = createJournal({ coalesceMs: 600, now: () => clock });
+  const rec = (k) => { const before = { ...s2 }; s2 = { ...s2, [k]: 1 }; const after = { ...s2 };
+    j2.record({ key: k, label: k, undo: () => (s2 = before), redo: () => (s2 = after) }); };
+  rec("a"); clock = 10; rec("b");
+  is(j2.depth().undo, 2, "two different fields stay two steps even within the window");
+
+  // Pausing past the window starts a new step.
+  let s3 = 0; clock = 0;
+  const j3 = createJournal({ coalesceMs: 600, now: () => clock });
+  const r3 = (v) => { const b = s3, a = v; s3 = v;
+    j3.record({ key: "x", label: "x", undo: () => (s3 = b), redo: () => (s3 = a) }); };
+  r3(1); clock = 5000; r3(2);
+  is(j3.depth().undo, 2, "pausing longer than the window starts a new step");
+
+  // seal() ends the current step explicitly — what a blur handler uses.
+  let s4v = 0; clock = 0;
+  const j4 = createJournal({ coalesceMs: 600, now: () => clock });
+  const r4 = (v) => { const b = s4v, a = v; s4v = v;
+    j4.record({ key: "x", label: "x", undo: () => (s4v = b), redo: () => (s4v = a) }); };
+  r4(1); j4.seal(); clock = 10; r4(2);
+  is(j4.depth().undo, 2, "seal() forces the next edit into a new step even inside the window");
+}
+
+console.log("Journal — bounds and notifications:");
+{
+  let clock = 0, fired = 0;
+  const j = createJournal({ limit: 3, coalesceMs: 0, now: () => ++clock, onChange: () => fired++ });
+  const noop = { undo() {}, redo() {} };
+  for (let i = 0; i < 5; i++) j.record({ label: `e${i}`, undo: noop.undo, redo: noop.redo });
+  is(j.depth().undo, 3, "the stack is bounded — oldest entries drop past the limit");
+  is(j.undoLabel(), "e4", "the newest entry is on top");
+  is(fired, 5, "onChange fires once per record");
+  j.undo(); is(fired, 6, "onChange fires on undo");
+  j.redo(); is(fired, 7, "onChange fires on redo");
+  j.reset();
+  is([j.depth(), j.undoLabel(), j.redoLabel()], [{ undo: 0, redo: 0 }, null, null],
+     "reset clears both stacks and both labels");
 }
 
 console.log(failures ? `\nFAILED (${failures})` : "\nAll s4-core checks passed.");
