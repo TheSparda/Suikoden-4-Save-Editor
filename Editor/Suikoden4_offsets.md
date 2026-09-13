@@ -528,3 +528,68 @@ NTSC-U disc only. Whole-population sweep of both BI1 and BI2. Entropy computed o
 0/4/8/16). ELF search was the full 3,214,528 bytes for the literal, the string, and lui/ori
 pairs. **Not** tried: LZSS variants other than LZARI, LZ77 with a 4 KB ring buffer, Sony
 DECOMP/ICE, and any per-entry 16-byte header interpretation of the +16 rule.
+
+---
+
+## 2026-09-13 — FILEDATA content fingerprinting: chance-level, as S3 predicted
+
+#47 asks for a multi-value fingerprint over the sub-file index to locate a game table. Three
+sweeps were run over all 62,308 entries. **None produced a usable candidate**, and the reason is
+the one S3 already recorded: *"a field-shape scan returned ~3,000–4,000 candidate tables per
+archive — chance level."*
+
+### Sweep 1 — id membership (fails because the id sets are too dense)
+
+For each stored (`flags=0`) entry, score the fraction of non-zero `u16` values that land inside
+the known id sets. **873 candidates at >90% purity** — meaningless.
+
+The sets are simply too dense to discriminate. Item ids run `0x01..0x226` and there are 518 of
+them, so **94% of all u16 values below 0x226 are valid item ids**. Rune ids run `0x01..0x29`
+with 41 of them — *every* value in that range is a valid rune id. A table of small integers
+passes this test whatever it contains.
+
+### Sweep 2 — set coverage (fails because big blobs contain everything)
+
+Require a window to contain most of a known id set. 100% coverage on blobs of 97–374 KB with
+16,000–28,000 distinct values. Of course: a 137 KB region of varied data contains every small
+u16 at least once. Coverage without a size constraint is vacuous.
+
+### Sweep 3 — near-permutation in a right-sized window (computationally impractical)
+
+The discriminating form: a window of exactly `count × stride` whose distinct values are a
+near-permutation of the id set. Over 62,308 entries × 3 id sets × 6 strides × sliding starts
+this did not complete in 35 minutes and was abandoned rather than left running. It would need
+narrowing to a candidate subset first — which is the thing there is no signal for yet.
+
+### Why this is not simply "try harder"
+
+The fingerprints available are weak *for this game*. S3's equivalents worked because they had
+discriminators S4's don't:
+
+- S3's room table had a **run-structure** discriminator (low byte constant, high byte counting up,
+  whole archive agreeing on one area id).
+- S3's enemy index had an independent **cross-check** (the Suikosource bestiary, matched at 97%+
+  on potch/SP).
+
+S4 has 518 item ids in a 550-wide range, 41 rune ids in a 41-wide range, and 113 character
+indices in `0..112`. None of those carries structure beyond membership, and there is no external
+table to cross-check against. The multi-value fingerprint #47 describes needs *values that are
+individually improbable*, and S4's aren't.
+
+### What would actually work, in order
+
+1. **The savestate shortcut** (#31 Attack D). Load a FILEDATA-backed asset, find it in RAM by a
+   value known from the guides, and search those exact bytes back into the archives. This turns
+   a search into a lookup and is the reason #34 was ported. Needs a PCSX2 run — the harness is in
+   place and its selftest passes, but no emulator is installed here.
+2. **Find the overlay that loads the archives.** Not in the boot ELF (proven in the previous
+   entry: 0 occurrences of the string or the magic). It is somewhere in the streamed data, and
+   locating it would give the entry semantics, the `flags` meaning and the content map at once.
+
+### Search parameters, so none of these are repeated
+
+NTSC-U disc. Sweep 1: `flags=0` entries sized 128..262,144 bytes, `u16` at stride 2, >90%
+membership in items or runes, 24,084 entries scanned. Sweep 2: all entries ≥512 bytes, strides
+2/4/6/8/16/32/0x44, >50% item or >85% rune coverage. Sweep 3: strides 2/4/8/16/32/0x44, windows
+of `count × stride` for items/runes/characters, sliding start over the first 4 KB, ≥80% distinct
+and >80% coverage — did not complete.
