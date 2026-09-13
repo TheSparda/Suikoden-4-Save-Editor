@@ -1,5 +1,29 @@
 # Suikoden IV Editor — delivery roadmap
 
+> ## Status — 2026-09-13
+>
+> **Phases 0–4 are complete.** Phase 5 is substantially done; Phases 6–7 are blocked on work
+> that cannot be finished from this machine, and the blockers are named at the end of this file
+> rather than left implicit.
+>
+> | Phase | | |
+> |---|---|---|
+> | 0 — rules + CI | ✅ | #8 #43 closed; #33 #38 #39 #40 #41 #42 policy landed |
+> | 1 — the spine | ✅ | #2 #5 #3 #4 #6 #7 |
+> | 2 — test harness | ✅ | #9 |
+> | 3 — save depth | ✅ | #15 #12 #14 #16 #11 #36 |
+> | 4 — ISO features | ✅ | #19 #20(B) #21 #41 #18(infra) |
+> | 5 — research | ◐ | #34 #44 done · #45 #46 #47 advanced, then blocked |
+> | 6 — post-keystone | ⛔ | all of #22–#30 sit behind #47 |
+> | 7 — guide layer | ⛔ | #13 #17 need guide text; #10 #37 need RE |
+>
+> The test suite went from **2 checks to 421**, plus a browser e2e suite, all green in CI.
+>
+> One thing found along the way outranks the feature work: **#48**, a live offset bug where
+> editing a character's Max HP or stats writes into a *different* character's record. Evidence is
+> in `Editor/Suikoden4_offsets.md`; it is not fixed here because the correct layout isn't fully
+> established and a partial fix could be worse than the present known-consistent state.
+
 Execution plan for all 43 open issues, written on the assumption that **every one of them gets
 built**. The ordering question is therefore not "which are worth doing" but "which order costs
 least" — foundations before the things that stand on them, and the long-pole research started
@@ -388,3 +412,38 @@ Phase 3, before any byte-diffing.**
 - **Write every duplicate copy**, and say so in the review.
 - **State what has actually been played.** A confidence badge moves only on a play report about
   *that mechanism*; a report earned under a different patch shape does not transfer.
+
+---
+
+## 8. What is blocked, and on exactly what
+
+Recorded so the next session starts from the boundary rather than rediscovering it.
+
+### Needs an emulator (PCSX2 is not installed on this machine)
+
+- **#47 content map**, and therefore **all of Phase 6** (#22–#30). Three fingerprint sweeps over
+  all 62,308 sub-files returned chance-level results — S3's own recorded outcome, reproduced,
+  because S4's id sets carry no structure beyond membership (518 item ids in a 550-wide range;
+  41 rune ids covering their range exactly). The route that works is #31's Attack D: find an
+  asset in RAM by a known value, then search those bytes back into the archives. **#34's harness
+  is ported and its selftest passes 117 checks in CI** — it is ready for whoever has an emulator.
+- **#45 / #46** — `flags` and the codec question. The ELF route is closed: the string `FILEDATA`
+  and the magic `0x82734927` appear **0 times** in the boot executable, so the loader is in a
+  streamed overlay.
+
+### Needs someone to play the game
+
+The capture session in §5 is still the unblock for **#1** (NG+ clear flag), **#35** (recruitment
+ordering), **#11's slot order**, and **#10's inventory offset** — the pnach gave up every other
+save field but its inventory codes are encrypted CodeBreaker, not raw writes.
+
+**#48 also needs one observation**: read a character's Max HP and STR off the screen, save, and
+compare against both candidate offsets. That settles a live data-corruption bug in minutes.
+
+### Needs an artifact not on this machine
+
+- **#18 PAL offsets** — the infrastructure is built and a PAL disc now identifies itself instead
+  of erroring; adding the three offsets is one entry per field once someone has the disc.
+- **#13 / #17 / #37 / #42** — guide text that isn't committed. #37 in particular turned out to be
+  mis-scoped: `Cheats/S4 Rune List.pdf` is the *Rune Affinity FAQ*, not a description list, so
+  there is no unblocked interim after all.
