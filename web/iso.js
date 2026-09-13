@@ -230,6 +230,10 @@
       <div class="card">
         <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
           <button class="chip" id="isoPnach">⧉ Copy pnach line</button>
+          <button class="chip" id="isoModOut" title="A tiny, reversible, version-checked recipe of exactly these byte changes">⬇ .s4mod</button>
+          <button class="chip" id="isoXdOut" title="A standard VCDIFF patch — xdelta3 -d -s &lt;pristine&gt; &lt;patch&gt; &lt;out&gt;">⬇ .xdelta</button>
+          <label class="chip" id="isoModInLabel" style="cursor:pointer" title="Apply a .s4mod or .xdelta — staged for review, never written directly">⬆ Apply patch…
+            <input type="file" id="isoModIn" accept=".s4mod,.xdelta,.json,application/json" style="display:none"></label>
           <span class="muted">${esc(isoName)} · ${esc(modeNote)}</span>
         </div>
         <div class="toolbar">
@@ -261,6 +265,9 @@
     const ur = $("#isoRedo"); if (ur) ur.onclick = () => JOURNAL.redo();
     refreshUndoButtons();
     $("#isoPnach").onclick = copyPnach;
+    $("#isoModOut").onclick = exportRecipe;
+    $("#isoXdOut").onclick = exportXdelta;
+    $("#isoModIn").onchange = (e) => { const f = e.target.files[0]; if (f) importPatch(f); e.target.value = ""; };
     drawView();
   }
 
@@ -532,6 +539,163 @@
   function markSaved() { for (const k in WINDOWS) { WINDOWS[k].orig = WINDOWS[k].buf.slice(); } }
 
   // ---- pnach export (universal fallback — works even where the ISO can't be written) ----
+  // ---- mod recipes and patches (#19) ---------------------------------------
+  //
+  // Two export formats, both built from the staged runs, so neither needs the 4 GB disc written
+  // first. S4's edits are three 4-byte code patches today, which makes a recipe about 300 bytes —
+  // the difference between "describe your change in a forum post" and "here is the change".
+  //
+  // A recipe is REVERSIBLE and VERSION-CHECKED: it carries the stock bytes as well as the new
+  // ones, so importing onto a disc that doesn't match stock can be refused rather than silently
+  // producing a half-patched image.
+  const MOD_FORMAT = "s4mod", MOD_VERSION = 1, MOD_GAME = "SLUS-209.79";
+
+  function buildRecipe() {
+    const runs = allRuns();
+    return {
+      format: MOD_FORMAT,
+      version: MOD_VERSION,
+      game: MOD_GAME,                       // refuse another game or region on import
+      created: new Date().toISOString(),
+      patches: runs.map((r) => {
+        // `from` is what this disc held before the edit, which is the stock value when the disc
+        // was stock. Carrying it is what makes an import verifiable instead of hopeful.
+        const w = Object.values(WINDOWS).find((x) => r.off >= x.off && r.off < x.off + x.len);
+        const at = r.off - w.off;
+        return { off: r.off, from: [...w.orig.slice(at, at + r.bytes.length)], to: [...r.bytes] };
+      }),
+    };
+  }
+
+  function exportRecipe() {
+    if (!anyDirty()) return setStatus("No changes to export.", "warn");
+    const rec = buildRecipe();
+    dl(new TextEncoder().encode(JSON.stringify(rec, null, 2)),
+       (isoName.replace(/\.[^.]+$/, "") || "suikoden4") + ".s4mod");
+    setStatus(`Exported ${rec.patches.length} patch${rec.patches.length === 1 ? "" : "es"} as .s4mod.`, "ok");
+  }
+
+  function exportXdelta() {
+    if (!anyDirty()) return setStatus("No changes to export.", "warn");
+    if (!isoFile) return setStatus("Open the disc first — an .xdelta needs its size.", "warn");
+    const edits = allRuns().map((r) => ({ off: r.off, data: r.bytes }));
+    const patch = Vcdiff.buildXdelta(isoFile.size, edits);
+    dl(patch, (isoName.replace(/\.[^.]+$/, "") || "suikoden4") + ".xdelta");
+    setStatus(`Exported ${edits.length} edit${edits.length === 1 ? "" : "s"} as .xdelta ` +
+              `(${fmtSize(patch.length)}) — apply with: xdelta3 -d -s <pristine> <patch> <out>`, "ok");
+  }
+
+  function dl(bytes, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+
+  // Import detects the format from the CONTENT, not the extension — a recipe renamed .txt is
+  // still a recipe, and an .xdelta is identified by its VCDIFF magic.
+  async function importPatch(file) {
+    if (!Object.keys(WINDOWS).length) return setStatus("Open your ISO first.", "warn");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const isVcdiff = bytes.length > 4 && bytes[0] === 0xD6 && bytes[1] === 0xC3 && bytes[2] === 0xC4;
+    const res = isVcdiff ? patchesFromXdelta(bytes) : patchesFromRecipe(bytes);
+    if (res.error) return setStatus(res.error, "err");
+    stagePatches(res.patches, res.label);
+  }
+
+  function patchesFromRecipe(bytes) {
+    let rec;
+    try { rec = JSON.parse(new TextDecoder().decode(bytes)); }
+    catch (e) { return { error: "That file is neither a .s4mod recipe nor an .xdelta patch." }; }
+    if (rec.format !== MOD_FORMAT)
+      return { error: `That recipe is "${rec.format || "unknown"}", not a Suikoden IV ${MOD_FORMAT}.` };
+    if (rec.game !== MOD_GAME)
+      return { error: `That recipe is for ${rec.game || "an unknown release"}; this disc is ${MOD_GAME}.` };
+    if (typeof rec.version !== "number" || rec.version > MOD_VERSION)
+      return { error: `That recipe is format v${rec.version}; this build understands v${MOD_VERSION}.` };
+    const patches = (rec.patches || []).map((p) => ({ off: p.off, to: Uint8Array.from(p.to || []),
+                                                      from: p.from ? Uint8Array.from(p.from) : null }));
+    return { patches, label: `${patches.length} patch${patches.length === 1 ? "" : "es"} from ${MOD_FORMAT}` };
+  }
+
+  // An .xdelta is a patch for the whole 4 GB disc, so it can't be decoded wholesale here. What
+  // makes it tractable is Vcdiff's plan(): it walks the instructions WITHOUT any source bytes and
+  // reports the target spans that don't provably come from the same position of the same file —
+  // narrowing "what might have changed" from gigabytes to a handful of ranges.
+  //
+  // plan() deliberately over-reports (a COPY fetching equal bytes from a different offset still
+  // counts), so every candidate span is decoded and compared against the disc before it becomes
+  // an edit. A span that turns out to be identical is dropped rather than staged as a no-op.
+  function patchesFromXdelta(bytes) {
+    const patches = [];
+    try {
+      Vcdiff.eachWindow(bytes, (w) => {
+        for (const [from, to] of w.plan()) {
+          const absFrom = w.targetStart + from, absTo = w.targetStart + to;
+          const win = Object.values(WINDOWS).find((x) => absFrom < x.off + x.len && absTo > x.off);
+          if (!win) {
+            throw new Error(`This patch changes bytes at 0x${absFrom.toString(16).toUpperCase()}, ` +
+              `outside every region this editor knows how to edit. Nothing was applied.`);
+          }
+          // Decode this window against the disc bytes it claims to source from. Only whole
+          // windows that sit inside a region we hold can be reproduced.
+          if (w.sourceStart < win.off || w.sourceStart + w.sourceLen > win.off + win.len) {
+            throw new Error(`This patch reproduces 0x${absFrom.toString(16).toUpperCase()} from disc ` +
+              `bytes outside the editable region, which this editor can't read. Nothing was applied.`);
+          }
+          const src = win.orig.subarray(w.sourceStart - win.off, w.sourceStart - win.off + w.sourceLen);
+          const out = w.decode(src);
+          const slice = out.subarray(from, to);
+          const at = absFrom - win.off;
+          if (slice.some((b, i) => b !== win.orig[at + i])) {
+            patches.push({ off: absFrom, to: slice.slice(), from: win.orig.slice(at, at + slice.length) });
+          }
+        }
+      });
+    } catch (e) {
+      return { error: e.message };      // includes the "-S none" guidance for LZMA patches
+    }
+    return { patches, label: `${patches.length} edit${patches.length === 1 ? "" : "s"} from .xdelta` };
+  }
+
+  // Staging an imported patch is the same path as any other edit: reviewable, undoable,
+  // revertible. Refusals are WHOLE-FILE — a patch that touches a byte this editor doesn't own is
+  // rejected outright rather than half-applied, because a half-applied disc is worse than none.
+  function stagePatches(patches, label) {
+    if (!patches.length) return setStatus("That patch contains no changes.", "warn");
+    const plan = [];
+    for (const p of patches) {
+      const w = Object.values(WINDOWS).find((x) => p.off >= x.off && p.off + p.to.length <= x.off + x.len);
+      if (!w) {
+        return setStatus(`Refused: this patch changes bytes at 0x${p.off.toString(16).toUpperCase()}, ` +
+          `which is outside every region this editor knows how to edit. Nothing was applied.`, "err");
+      }
+      const at = p.off - w.off;
+      if (p.from && p.from.some((b, i) => b !== w.orig[at + i])) {
+        return setStatus(`Refused: the disc does not match what this patch expects at ` +
+          `0x${p.off.toString(16).toUpperCase()} — it was built against a different or ` +
+          `already-modified disc. Nothing was applied.`, "err");
+      }
+      plan.push({ w, at, bytes: p.to });
+    }
+    const before = {};
+    for (const k in WINDOWS) before[k] = WINDOWS[k].buf.slice();
+    for (const { w, at, bytes } of plan) w.buf.set(bytes, at);
+    const after = {};
+    for (const k in WINDOWS) after[k] = WINDOWS[k].buf.slice();
+    JOURNAL.record({
+      label: `Apply ${label}`,
+      undo: () => { for (const k in before) WINDOWS[k].buf.set(before[k]); drawView(); },
+      redo: () => { for (const k in after) WINDOWS[k].buf.set(after[k]); drawView(); },
+    });
+    drawView();
+    const rows = reviewRows();
+    if (!rows.length) return setStatus("That patch matches this disc already — nothing to change.", "ok");
+    openConfirm(rows, () => {}, "Close");
+    setStatus(`Staged ${label} — review and save when ready.`, "ok");
+  }
+
   function copyPnach() {
     const lines = ["// Suikoden IV (NTSC-U) — from the web ISO editor"];
     let n = 0;
