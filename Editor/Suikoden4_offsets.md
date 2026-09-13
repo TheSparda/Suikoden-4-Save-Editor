@@ -593,3 +593,32 @@ membership in items or runes, 24,084 entries scanned. Sweep 2: all entries ≥51
 2/4/6/8/16/32/0x44, >50% item or >85% rune coverage. Sweep 3: strides 2/4/8/16/32/0x44, windows
 of `count × stride` for items/runes/characters, sliding start over the first 4 KB, ≥80% distinct
 and >80% coverage — did not complete.
+
+---
+
+## 2026-09-13 — inventory: the pnach does NOT give it away
+
+The pnach carried the whole character record (see the 2026-09-12 entry), so it was the obvious
+place to look for the item bag too. It has the right-looking sections —
+`[Have Items Modifier Codes\Slot 1..7]` — but they are **encrypted CodeBreaker codes**, not the
+plain `2xxxxxxx`-style raw writes the character codes use:
+
+```
+[Have Items Modifier Codes\Slot 1]  type1 0x00ab5582 val=000094CA
+[Have Items Modifier Codes\Slot 2]  type4 0x0113a4b9 val=0AD81E79
+[Have Items Modifier Codes\Slot 3]  type9 0x01e84744 val=79782198
+[Have Items Modifier Codes\Slot 4]  typeF 0x006c4e90 val=E74B9A7C
+```
+
+Scattered addresses, random-looking values, and type nibbles (9, F, 8) that are not plain write
+types. None of the seven lands inside the save block. Decrypting CodeBreaker v7+ codes needs the
+per-game seed, which is not available here.
+
+So **#10 (inventory) is not unblocked by the pnach**, unlike every other save field. It still
+needs the controlled capture the issue describes: two saves from one playthrough separated by a
+single known item pickup, diffed with the id-membership filter over the 519 known item ids.
+
+**Search parameters:** the whole 5,496-line NTSC-U pnach was parsed; the only inventory-shaped
+sections are the seven above, all encrypted. `Cheats/Suikoden IV (USA).ct` and the two
+`NTSC PCSX2` tables were not re-checked for an inventory entry — worth five minutes before
+anyone reaches for a diff.
