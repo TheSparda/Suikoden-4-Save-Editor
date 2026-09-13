@@ -93,10 +93,43 @@
 
   function fieldValue(f, from) { return f.read(new DataView(from.buffer, from.byteOffset, from.length)); }
   function isDirty(k) { const w = win(k); return w && w.buf.some((b, i) => b !== w.orig[i]); }
-  function anyDirty() { return Object.keys(WINDOWS).some(isDirty); }
+  function anyDirty() { return Object.keys(WINDOWS).some(isDirty) || Object.keys(TEXT_EDITS).length > 0; }
   // absolute-offset changed runs across all windows
-  function allRuns() {
+  // Byte runs from the in-ELF text editor (#21). These do NOT live in WINDOWS — the ELF is a
+  // separate 3.2 MB read — so they have to be folded in here explicitly, or an edit made on the
+  // Text tab would be collected and then silently dropped on save.
+  //
+  // A shorter replacement is NUL-terminated rather than space-padded: the engine reads these as
+  // C strings, so the terminator is what actually shortens it, and the bytes past it are left
+  // alone rather than blanked (nothing reads them, and rewriting them would enlarge the diff).
+  function textRuns() {
     const out = [];
+    if (!ELF || !TEXTS) return out;
+    for (const [offStr, val] of Object.entries(TEXT_EDITS)) {
+      const off = +offStr;
+      const t = TEXTS.find((x) => x.off === off);
+      if (!t) continue;
+      const at = off - ELF_OFF;
+      const bytes = new Uint8Array(t.max);
+      bytes.set(ELF.subarray(at, at + t.max));
+      const enc = [...val].map((c) => c.charCodeAt(0) & 0x7F).slice(0, t.max);
+      bytes.set(enc, 0);
+      if (enc.length < t.max) bytes[enc.length] = 0;
+      // Emit only the bytes that actually differ, same as every other run.
+      let i = 0;
+      while (i < t.max) {
+        if (bytes[i] !== ELF[at + i]) {
+          const st = i;
+          while (i < t.max && bytes[i] !== ELF[at + i]) i++;
+          out.push({ off: off + st, bytes: bytes.slice(st, i) });
+        } else i++;
+      }
+    }
+    return out;
+  }
+
+  function allRuns() {
+    const out = textRuns();
     for (const k in WINDOWS) {
       const w = WINDOWS[k]; let i = 0;
       while (i < w.len) {
@@ -135,6 +168,7 @@
     }
     WINDOWS = wins; isoHandle = handle; isoFile = file; isoName = file.name || "Suikoden IV.iso";
     JOURNAL.reset();                      // a newly opened disc has no history to unwind
+    ELF = null; TEXTS = null; TEXT_EDITS = {};   // …and no text read from the previous one
     saveNudged = false;
     if (handle) idbSet("lastIso", { name: isoName, handle, at: Date.now() }).catch(() => {});
     render();
@@ -213,6 +247,7 @@
   const VIEWS = [
     ["encounter", "Encounters", drawEncounters],
     ["changes", "Changes", drawChanges],
+    ["text", "Text", drawText],
   ];
   const VIEW_KEY = "s4editor-iso-view";
   let VIEW = (() => { try { return localStorage.getItem(VIEW_KEY) || VIEWS[0][0]; } catch (e) { return VIEWS[0][0]; } })();
@@ -307,6 +342,75 @@
       VIEW = b.dataset.view;
       try { localStorage.setItem(VIEW_KEY, VIEW); } catch (e) {}
       drawView();
+    }));
+  }
+
+  // ---- in-ELF text (#21) ---------------------------------------------------
+  //
+  // Scope, measured rather than assumed (see text-core.js): the boot ELF holds the engine's own
+  // memory-card and save/load messages as printable ASCII, alongside a lot of developer strings.
+  // Item, character and rune names are NOT here — they are packed in FILEDATA (#31).
+  //
+  // Every edit is capped to the run's original byte length. Growing a string would mean
+  // repointing every reference to it, which this editor cannot do, so a longer value is refused
+  // rather than truncated.
+  const ELF_OFF = 367 * 2048, ELF_LEN = 3214528;
+  let ELF = null, TEXTS = null, TEXT_EDITS = {};   // off -> string
+
+  async function loadElf() {
+    if (ELF || !isoFile) return ELF;
+    ELF = new Uint8Array(await isoFile.slice(ELF_OFF, ELF_OFF + ELF_LEN).arrayBuffer());
+    TEXTS = TextCore.scanStrings(ELF, ELF_OFF);
+    return ELF;
+  }
+
+  const readText = (t) => {
+    if (t.off in TEXT_EDITS) return TEXT_EDITS[t.off];
+    let s = "";
+    for (let i = 0; i < t.max; i++) s += String.fromCharCode(ELF[t.off - ELF_OFF + i]);
+    return s;
+  };
+
+  function drawText(host) {
+    host.innerHTML = `<div class="card"><h3 class="sec">Text in the boot ELF</h3>
+      <p class="muted">Reading the executable…</p></div>`;
+    loadElf().then(() => renderTextList(host)).catch((e) =>
+      (host.innerHTML = `<div class="card"><div class="warnbox">Couldn't read the executable: ${esc(e.message)}</div></div>`));
+  }
+
+  function renderTextList(host, filter) {
+    const q = (filter || "").toLowerCase();
+    const rows = TEXTS.map((t) => ({ t, s: readText(t) }))
+                      .filter((r) => !q || r.s.toLowerCase().includes(q));
+    host.innerHTML = `<div class="card">
+      <h3 class="sec">Text in the boot ELF</h3>
+      <p class="muted" data-sum="The engine's own memory-card and save/load messages. Item, character and rune names are not here — they are packed in FILEDATA.">
+        These are strings stored as printable ASCII in the boot executable: the engine's own
+        memory-card and save/load messages, plus a lot of developer and error text. <b>Item,
+        character and rune names are not here</b> — those are packed inside FILEDATA (issue #31),
+        which is why the reference tables had to be extracted from a cheat table. Each edit is
+        capped to the original byte length, because growing a string would mean repointing every
+        reference to it.</p>
+      <input class="search" id="txq" placeholder="filter ${TEXTS.length} strings…" value="${esc(filter || "")}">
+      <div style="max-height:60vh;overflow:auto">
+      <table class="invtbl"><thead><tr><th>Address</th><th>Text</th><th>Max</th></tr></thead><tbody>
+      ${rows.slice(0, 400).map(({ t, s }) => `<tr${t.off in TEXT_EDITS ? ' class="dirtyrow"' : ""}>
+        <td class="sl">0x${t.off.toString(16).toUpperCase()}</td>
+        <td><input type="text" data-txt="${t.off}" maxlength="${t.max}" value="${esc(s)}" style="width:100%"></td>
+        <td class="sl">${t.max}</td></tr>`).join("")}
+      </tbody></table></div>
+      ${rows.length > 400 ? `<div class="muted" style="padding:8px">showing 400 of ${rows.length} — keep typing</div>` : ""}
+      <div class="muted" style="padding:8px 0 0">${TEXTS.length} strings found${q ? `, ${rows.length} matching` : ""}.</div>
+    </div>`;
+    const sq = $("#txq");
+    sq.oninput = () => { const v = sq.value; renderTextList(host, v); const n = $("#txq"); n.focus(); n.setSelectionRange(v.length, v.length); };
+    $$("[data-txt]").forEach((el) => (el.onchange = () => {
+      const off = +el.dataset.txt;
+      const t = TEXTS.find((x) => x.off === off);
+      if (el.value.length > t.max) { el.value = el.value.slice(0, t.max); }
+      TEXT_EDITS[off] = el.value;
+      el.classList.add("dirty");
+      setStatus(`Staged "${el.value}" at 0x${off.toString(16).toUpperCase()} (max ${t.max} bytes).`, "");
     }));
   }
 
@@ -532,6 +636,19 @@
   // maps file 0x1000 → vaddr 0x280000, so vaddr = 0x280000 + (isoOff - ELF_START - 0x1000).
   const isoToVaddr = (off) => 0x280000 + (off - ISO_ELF_START - 0x1000);
 
+  function textReviewRows() {
+    if (!ELF || !TEXTS) return [];
+    const rows = [];
+    for (const [offStr, val] of Object.entries(TEXT_EDITS)) {
+      const off = +offStr;
+      const t = TEXTS.find((x) => x.off === off); if (!t) continue;
+      let was = "";
+      for (let i = 0; i < t.max; i++) was += String.fromCharCode(ELF[off - ELF_OFF + i]);
+      if (was !== val) rows.push({ g: "Text", t: `0x${off.toString(16).toUpperCase()}: "${was.trim()}" → "${val.trim()}"` });
+    }
+    return rows;
+  }
+
   function reviewRows() {
     const rows = [];
     for (const f of FIELDS) {
@@ -541,7 +658,7 @@
       const fmt = (x) => f.type === "bool" ? (x ? "on" : "off") : `${x}${f.type === "percent" ? "%" : ""}`;
       rows.push({ g: f.group, t: `${f.label}: ${fmt(ov)} → ${fmt(nv)}` });
     }
-    return rows;
+    return rows.concat(textReviewRows());
   }
 
   function save() {
