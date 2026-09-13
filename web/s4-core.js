@@ -145,6 +145,49 @@
     return rows;
   }
 
+  // ---- per-field restore (#4) ----------------------------------------------
+
+  // Drop one staged field from the overlays, restoring what the file holds.
+  //
+  // It *removes* the staged value rather than writing the file's value over it, and that
+  // distinction is the whole correctness argument. Level is a display of EXP: writing back
+  // expFromLv(lvFromExp(fileExp)) would floor an EXP of 4567 to 4000 and silently lose 567 points.
+  // Dropping the overlay cannot be approximate — whatever the file holds is what comes back.
+  //
+  // Emptied containers are deleted on the way out so the overlay never holds a `{}` that makes
+  // countEffective() look non-zero while buildDiff() reports nothing.
+  //
+  //   what  "potch" | "gameTime" | "worldMapFull" | "name:<key>"      (ri omitted)
+  //         "recruit" | "k:<field>" | "stat:<n>" | "rune:<slot>"
+  //         | "equip:<slot>" | "unite:<slot>"                          (ri required)
+  //
+  // Mutates in place and returns the same object, so the caller's snapshot/journal wrapper sees
+  // the change exactly as it sees a normal edit.
+  function revertStaged({ saveEdits = {}, names = {}, charEdits = {} }, what, ri) {
+    const i = what.indexOf(":");
+    const kind = i < 0 ? what : what.slice(0, i);
+    const arg = i < 0 ? null : what.slice(i + 1);
+
+    if (ri === null || ri === undefined) {
+      if (kind === "name") delete names[arg];
+      else delete saveEdits[kind];                 // potch / gameTime / worldMapFull
+      return { saveEdits, names, charEdits };
+    }
+
+    const e = charEdits[ri];
+    if (!e) return { saveEdits, names, charEdits };
+
+    const nested = { stat: "stats", rune: "runes", equip: "equip", unite: "unites" }[kind];
+    if (what === "recruit") delete e.recruited;
+    else if (kind === "k") delete e[arg];
+    else if (nested && e[nested]) {
+      delete e[nested][arg];
+      if (!Object.keys(e[nested]).length) delete e[nested];
+    }
+    if (!Object.keys(e).length) delete charEdits[ri];
+    return { saveEdits, names, charEdits };
+  }
+
   // ---- staging journal (undo / redo) ---------------------------------------
 
   // A generic edit journal. It knows nothing about saves, discs or the DOM — a caller records a
@@ -215,7 +258,7 @@
   const API = {
     REC_STATES, STAT_NAMES, GEAR_LABELS, CHAR_CAP, POTCH_MAX, LV_MAX,
     AFF_ELEMS, AFF_RATE, AFF_ALIAS,
-    lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal,
+    lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal, revertStaged,
   };
   Object.assign(root, API);
   root.S4Core = API;

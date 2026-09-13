@@ -230,3 +230,16 @@ button.picker.dirty { color:var(--warn); border-color:var(--warnbd); background-
   .picker-list { max-height:70vh; }
 }
 @media(prefers-reduced-motion:reduce){ .spinner{ animation:none; } }
+
+/* Per-field restore (#4). Hidden until the field is dirty — .has-dirty is set from one place in
+   JS (refreshReverts) rather than a CSS :has() selector, so it works the same everywhere and
+   can't silently no-op on a browser without :has(). */
+.revert { display:none; font:inherit; font-size:11px; line-height:1; padding:2px 6px; margin-left:6px;
+  border:1px solid var(--line); border-radius:999px; background:var(--input-bg); color:var(--mut);
+  cursor:pointer; vertical-align:middle; }
+.revert:hover { border-color:var(--acc); color:var(--acc2); }
+.revert:focus-visible { outline:0; border-color:var(--acc); box-shadow:0 0 0 3px var(--focusring); }
+.field.has-dirty > span > .revert,
+.isotoggle.has-dirty .revert,
+.row.has-dirty > .revert,
+.ratefield.has-dirty .revert { display:inline-flex; }

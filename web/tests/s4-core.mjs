@@ -13,7 +13,7 @@ import { fileURLToPath } from "url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const core = createRequire(import.meta.url)(path.resolve(HERE, "..", "s4-core.js"));
 const { REC_STATES, CHAR_CAP, POTCH_MAX, LV_MAX, AFF_RATE, AFF_ALIAS,
-        lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal } = core;
+        lvFromExp, expFromLv, gtLabel, recName, affFor, buildDiff, createJournal, revertStaged } = core;
 
 let failures = 0;
 const ok = (m) => console.log("  ✓ " + m);
@@ -168,6 +168,64 @@ is(buildDiff(), [], "called with no arguments at all, returns no rows");
 {
   const many = diff({ saveEdits: { potch: 2 }, charEdits: { 0: { maxHP: 1, weaponLvl: 1 } } });
   is(many.length, 3, "multiple edits across groups all appear");
+}
+
+// ---- per-field restore ----------------------------------------------------
+console.log("revertStaged — per-field restore:");
+{
+  const mk = () => ({
+    saveEdits: { potch: 500, gameTime: 7200, worldMapFull: 1 },
+    names: { hero: "Sparda", ship: "Dauntless" },
+    charEdits: { 0: { exp: 6000, maxHP: 999, recruited: 11,
+                      stats: { STR: 777, SKL: 5 }, runes: { 0: 9 }, equip: { head: 2 }, unites: { 0: 3 } } },
+  });
+
+  let o = mk(); revertStaged(o, "potch");
+  is([("potch" in o.saveEdits), o.saveEdits.gameTime], [false, 7200], "potch drops without touching game time");
+  o = mk(); revertStaged(o, "worldMapFull");
+  is("worldMapFull" in o.saveEdits, false, "world-map flag drops");
+  o = mk(); revertStaged(o, "name:hero");
+  is(o.names, { ship: "Dauntless" }, "one name drops, the other stays");
+
+  o = mk(); revertStaged(o, "k:maxHP", 0);
+  is([("maxHP" in o.charEdits[0]), o.charEdits[0].exp], [false, 6000], "a scalar field drops, siblings stay");
+  o = mk(); revertStaged(o, "recruit", 0);
+  is("recruited" in o.charEdits[0], false, "recruitment drops");
+  o = mk(); revertStaged(o, "stat:STR", 0);
+  is(o.charEdits[0].stats, { SKL: 5 }, "one stat drops, the rest of the block survives");
+  o = mk(); revertStaged(o, "rune:0", 0);
+  is("runes" in o.charEdits[0], false, "emptying the rune block removes the block");
+  o = mk(); revertStaged(o, "equip:head", 0);
+  is("equip" in o.charEdits[0], false, "emptying the equip block removes the block");
+  o = mk(); revertStaged(o, "unite:0", 0);
+  is("unites" in o.charEdits[0], false, "emptying the unite block removes the block");
+
+  // Reverting the last staged field for a character removes the character entry entirely, so the
+  // overlay never carries an empty {} that makes the editor look dirty when it isn't.
+  o = { saveEdits: {}, names: {}, charEdits: { 0: { maxHP: 999 } } };
+  revertStaged(o, "k:maxHP", 0);
+  is(o.charEdits, {}, "the last field for a character removes the character entry");
+  o = { saveEdits: {}, names: {}, charEdits: { 0: { stats: { STR: 1 } } } };
+  revertStaged(o, "stat:STR", 0);
+  is(o.charEdits, {}, "…including when the last field was inside a nested block");
+
+  // Reverting is a no-op when there is nothing staged — it must never invent an entry.
+  o = { saveEdits: {}, names: {}, charEdits: {} };
+  revertStaged(o, "k:maxHP", 7);
+  is(o.charEdits, {}, "reverting an unstaged character creates nothing");
+  revertStaged(o, "stat:STR", 7);
+  is(o.charEdits, {}, "…and neither does a nested revert");
+
+  // The property the whole feature rests on: after reverting every staged field, buildDiff sees
+  // nothing. Not "sees empty objects" — sees nothing.
+  o = mk();
+  for (const w of ["potch", "gameTime", "worldMapFull"]) revertStaged(o, w);
+  for (const w of ["name:hero", "name:ship"]) revertStaged(o, w);
+  for (const w of ["k:exp", "k:maxHP", "recruit", "stat:STR", "stat:SKL", "rune:0", "equip:head", "unite:0"])
+    revertStaged(o, w, 0);
+  is([o.saveEdits, o.names, o.charEdits], [{}, {}, {}], "reverting every field leaves all three overlays empty");
+  is(buildDiff({ save, saveEdits: o.saveEdits, names: o.names, charEdits: o.charEdits }), [],
+     "…and buildDiff reports no changes");
 }
 
 // ---- staging journal ------------------------------------------------------

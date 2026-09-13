@@ -235,7 +235,7 @@
             : `<button class="primary" id="isoSave">${mode === "stream" ? "Save patched copy" : "Save to ISO"}</button>
                <button id="isoUndo" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↶</button>
                <button id="isoRedo" title="Redo (Shift+Ctrl/Cmd+Z)" aria-label="Redo">↷</button>
-               <button id="isoReset">Reset</button>
+               <button id="isoReset" title="Drop every staged edit — undoable">Revert all</button>
                <span class="status" id="isoStatus"></span>`}
         </div>
       </div>`;
@@ -248,7 +248,7 @@
       if (!anyDirty()) return;
       for (const k in WINDOWS) WINDOWS[k].buf.set(WINDOWS[k].orig);
       JOURNAL.record({
-        label: "Reset all",
+        label: "Revert all",
         undo: () => { for (const k in before) WINDOWS[k].buf.set(before[k]); drawView(); },
         redo: () => { for (const k in after) WINDOWS[k].buf.set(after[k]); drawView(); },
       });
@@ -273,8 +273,13 @@
     host.innerHTML = "";
     v[2](host);
     FIELDS.forEach(wireField);   // no-ops for fields the active tab didn't render
+    $$("[data-isorevert]").forEach((b) => (b.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();   // the ↺ sits inside a <label> — don't toggle it
+      revertField(b.dataset.isorevert);
+    }));
     syncEnable();
     refreshUndoButtons();
+    refreshReverts();
   }
 
   // The per-tab count of staged edits. Redrawn on every commit as well as on a tab switch —
@@ -312,18 +317,45 @@
     }).join("");
   }
 
+  const revBtn = (f) =>
+    `<button type="button" class="revert" data-isorevert="${f.key}" title="Restore this field to the bytes on the disc" aria-label="Restore this field">↺</button>`;
+
+  // Restore one field to the bytes the disc was loaded with. A byte copy from the window's own
+  // `orig`, not a recomputation — so a derived display like the encounter-rate percentage comes
+  // back exactly, including a stock value that doesn't divide cleanly into 10000.
+  function revertField(key) {
+    const w = win(key); if (!w || !isDirty(key)) return;
+    const before = w.buf.slice(), after = w.orig.slice();
+    w.buf.set(w.orig);
+    JOURNAL.record({
+      label: `Restore ${(FIELDS.find((f) => f.key === key) || {}).label || key}`,
+      undo: () => { w.buf.set(before); drawView(); },
+      redo: () => { w.buf.set(after); drawView(); },
+    });
+    drawView();
+  }
+
+  // Keeps every ↺ in step with its field after an edit, without a full repaint.
+  function refreshReverts() {
+    FIELDS.forEach((f) => {
+      const wrap = document.querySelector(`[data-fieldwrap="${f.key}"]`) ||
+                   document.querySelector(`[data-iso="${f.key}"]`)?.closest(".isotoggle");
+      if (wrap) wrap.classList.toggle("has-dirty", isDirty(f.key));
+    });
+  }
+
   function fieldHtml(f) {
     const w = win(f.key); const cur = f.read(w.dv);
     if (f.type === "bool") {
-      return `<label class="isotoggle"><input type="checkbox" data-iso="${f.key}" ${cur ? "checked" : ""}${isDirty(f.key) ? ' class="dirty"' : ""}>
-          <span class="isotxt"><b>${esc(f.label)}</b>${f.sub ? `<span class="isosub">${esc(f.sub)}</span>` : ""}</span></label>`;
+      return `<label class="isotoggle${isDirty(f.key) ? " has-dirty" : ""}"><input type="checkbox" data-iso="${f.key}" ${cur ? "checked" : ""}${isDirty(f.key) ? ' class="dirty"' : ""}>
+          <span class="isotxt"><b>${esc(f.label)}</b>${revBtn(f)}${f.sub ? `<span class="isosub">${esc(f.sub)}</span>` : ""}</span></label>`;
     }
     const presets = (f.presets || []).map(([lbl, v]) =>
       `<button type="button" class="chip mini" data-preset="${f.key}" data-pv="${v}"${v === cur ? ' aria-pressed="true"' : ""}>${esc(lbl)}</button>`).join("");
     const sl = f.slider;
     const sliderHtml = sl
       ? `<input type="range" class="rateslider" data-rateslider="${f.key}" min="${sl[0]}" max="${sl[1]}" step="${sl[2] || 1}" value="${Math.min(sl[1], Math.max(sl[0], cur))}" aria-label="${esc(f.label)}">` : "";
-    return `<div class="field ratefield" data-fieldwrap="${f.key}"><span>${esc(f.label)} <span class="muted">(${esc(f.unit || "")})</span></span>
+    return `<div class="field ratefield${isDirty(f.key) ? " has-dirty" : ""}" data-fieldwrap="${f.key}"><span>${esc(f.label)} <span class="muted">(${esc(f.unit || "")})</span>${revBtn(f)}</span>
         ${presets ? `<div class="presetrow">${presets}</div>` : ""}
         <div class="raterow">
           ${sliderHtml}
@@ -369,6 +401,7 @@
       if (f.type !== "bool") highlight();
       syncEnable();
       refreshViewTabs();
+      refreshReverts();
     };
     el.onchange = el.oninput = commit;
     el.onblur = () => JOURNAL.seal();     // two visits to one box are two edits, however fast

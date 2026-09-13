@@ -282,8 +282,27 @@ function staged(label, key, fn) {
   if (before !== after) {
     JOURNAL.record({ label, key, undo: () => restoreStaged(before), redo: () => restoreStaged(after) });
   }
-  refreshDirty();
+  refreshDirty(); refreshReverts();
 }
+// Restore one field to the value the file was loaded with — the rule (and why dropping the
+// overlay beats writing a recomputed value back) lives in s4-core.js's revertStaged().
+function revertField(what, ri) {
+  staged(`Restore ${what.replace(/^\w+:/, "")}`, null,
+    () => S4Core.revertStaged({ saveEdits: SAVEDITS, names: NAMES, charEdits: CE }, what, ri));
+  drawSlot(true);
+}
+
+// One delegated listener for every ↺ on the page — the buttons are re-rendered constantly, so
+// per-button wiring would have to be redone on each repaint.
+function bindReverts() {
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest(".revert[data-revert]");
+    if (!b || !document.querySelector("#slotbody")?.contains(b)) return;
+    e.preventDefault(); e.stopPropagation();
+    revertField(b.dataset.revert, b.dataset.rri == null ? null : +b.dataset.rri);
+  });
+}
+
 function refreshUndoButtons() {
   const u = $("#undoBtn"), r = $("#redoBtn");
   if (u) { u.disabled = !JOURNAL.canUndo(); u.title = JOURNAL.canUndo() ? `Undo ${JOURNAL.undoLabel()} (Ctrl/Cmd+Z)` : "Nothing to undo"; }
@@ -322,7 +341,7 @@ function drawSlot(keepStaged) {
 
   const names = (s.names || []).map((n) => {
     const val = n.key in NAMES ? NAMES[n.key] : (n.value || "");
-    return `<label class="field"><span>${esc(n.label)}</span>
+    return `<label class="field"><span>${esc(n.label)}${rev(`name:${esc(n.key)}`)}</span>
        <input type="text" maxlength="${n.max}" value="${esc(val)}" class="${dz(val, n.value || "").trim()}"
               data-name="${esc(n.key)}" data-def="${esc(n.value || "")}"></label>`;
   }).join("");
@@ -347,15 +366,15 @@ function drawSlot(keepStaged) {
       <div class="grid">${names}</div>
       <h3 class="sec">Money &amp; time</h3>
       <div class="grid">
-        <label class="field"><span>Potch <button type="button" class="chip mini" id="maxPotch">max</button></span>
+        <label class="field"><span>Potch <button type="button" class="chip mini" id="maxPotch">max</button>${rev("potch")}</span>
           <input type="number" min="0" max="99999999" id="potchfld"
                  value="${"potch" in SAVEDITS ? SAVEDITS.potch : (s.potch || 0)}" data-def="${s.potch || 0}"
                  class="${dz("potch" in SAVEDITS ? SAVEDITS.potch : (s.potch || 0), s.potch || 0).trim()}"></label>
-        <label class="field"><span>Game time (seconds) — <span id="gtlabel">${gtLabel("gameTime" in SAVEDITS ? SAVEDITS.gameTime : s.gameTimeSec)}</span></span>
+        <label class="field"><span>Game time (seconds) — <span id="gtlabel">${gtLabel("gameTime" in SAVEDITS ? SAVEDITS.gameTime : s.gameTimeSec)}</span>${rev("gameTime")}</span>
           <input type="number" min="0" max="3596400" id="gtfld"
                  value="${"gameTime" in SAVEDITS ? SAVEDITS.gameTime : (s.gameTimeSec || 0)}" data-def="${s.gameTimeSec || 0}"
                  class="${dz("gameTime" in SAVEDITS ? SAVEDITS.gameTime : (s.gameTimeSec || 0), s.gameTimeSec || 0).trim()}"></label>
-        <div class="field"><span>World map (${s.worldMapPct != null ? s.worldMapPct + "% explored" : "—"})</span>
+        <div class="field${SAVEDITS.worldMapFull ? " dirty-soft" : ""}"><span>World map (${s.worldMapPct != null ? s.worldMapPct + "% explored" : "—"})${rev("worldMapFull")}</span>
           <label class="row" style="gap:6px;cursor:pointer;min-height:38px">
             <input type="checkbox" id="wmfull"${SAVEDITS.worldMapFull ? " checked" : ""}> mark fully explored on write</label></div>
       </div>
@@ -378,7 +397,7 @@ function drawSlot(keepStaged) {
             (CAN_SHARE_FILES ? `<button id="shareBtn">Apply &amp; share…</button>` : "") +
             `<button id="undoBtn" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↶</button>
              <button id="redoBtn" title="Redo (Shift+Ctrl/Cmd+Z)" aria-label="Redo">↷</button>
-             <button id="resetBtn">Reset</button>
+             <button id="resetBtn" title="Drop every staged edit — undoable">Revert all</button>
              <span class="badge hidden" id="dirtyBadge">0 unsaved</span>
              <span class="status" id="status"></span>`}
       </div>
@@ -421,11 +440,18 @@ function drawSlot(keepStaged) {
   const sb = $("#saveBtn"); if (sb) sb.onclick = () => applyEdits("download");
   const sfb = $("#saveFileBtn"); if (sfb) sfb.onclick = () => applyEdits("file");
   const shb = $("#shareBtn"); if (shb) shb.onclick = () => applyEdits("share");
-  const rb = $("#resetBtn"); if (rb) rb.onclick = () => drawSlot();
+  // Revert all drops every staged edit but stays undoable — it is the most destructive control
+  // in the editor, and before #3/#4 it silently discarded the lot.
+  const rb = $("#resetBtn"); if (rb) rb.onclick = () => {
+    if (!countEffective()) return;
+    staged("Revert all", null, () => { CE = {}; NAMES = {}; SAVEDITS = {}; });
+    drawSlot(true);
+  };
   const ub = $("#undoBtn"); if (ub) ub.onclick = () => JOURNAL.undo();
   const rdb = $("#redoBtn"); if (rdb) rdb.onclick = () => JOURNAL.redo();
   refreshUndoButtons();
   showSub();
+  refreshReverts();
 }
 
 // ---- subtab switch ---------------------------------------------------------
@@ -503,28 +529,30 @@ function charCard(c) {
   };
   const stat = (n) => {
     const file = c.stats[n], val = curStat(c, n);
-    return `<label class="field"><span>${n}</span><input type="number" min="0" max="999" value="${val}" data-ri="${ri}" data-stat="${n}" data-def="${file}" class="${dz(val, file).trim()}"></label>`;
+    return `<label class="field"><span>${n}${rev(`stat:${n}`, ri)}</span><input type="number" min="0" max="999" value="${val}" data-ri="${ri}" data-stat="${n}" data-def="${file}" class="${dz(val, file).trim()}"></label>`;
   };
 
   const lv = lvFromExp(curK(c, "exp")), lvFile = lvFromExp(c.exp);
+  // Level and EXP are one stored field; ↺ on either drops the staged EXP, so the file's exact
+  // value comes back rather than expFromLv(lvFromExp(exp)), which would floor it.
   const core = `
-    <label class="field"><span>Level</span>
+    <label class="field"><span>Level${rev("k:exp", ri)}</span>
       <input type="number" min="1" max="99" value="${lv}" data-lv="${ri}" data-def="${lvFile}" class="${dz(lv, lvFile).trim()}" title="writes EXP = (Lv−1)×1000"></label>
-    <label class="field"><span>EXP</span>${num("exp", CHAR_CAP.exp)}</label>
-    <label class="field"><span>Weapon Lv</span>${num("weaponLvl", CHAR_CAP.weaponLvl)}</label>
-    <label class="field"><span>Max HP</span>${num("maxHP", CHAR_CAP.maxHP)}</label>`;
+    <label class="field"><span>EXP${rev("k:exp", ri)}</span>${num("exp", CHAR_CAP.exp)}</label>
+    <label class="field"><span>Weapon Lv${rev("k:weaponLvl", ri)}</span>${num("weaponLvl", CHAR_CAP.weaponLvl)}</label>
+    <label class="field"><span>Max HP${rev("k:maxHP", ri)}</span>${num("maxHP", CHAR_CAP.maxHP)}</label>`;
 
   const stats = STAT_NAMES.map(stat).join("");
 
   const runes = [0, 1, 2].map((slot) => {
     const file = c.runes[slot] || 0, cur = curRune(c, slot);
-    return `<label class="field"><span>Rune ${slot + 1}</span>
+    return `<label class="field"><span>Rune ${slot + 1}${rev(`rune:${slot}`, ri)}</span>
       <button type="button" class="picker${dz(cur, file)}" data-runeri="${ri}" data-runeslot="${slot}" data-val="${cur}" data-def="${file}">${esc(runeLabel(cur))}</button></label>`;
   }).join("");
 
   const equip = EQUIP_SLOTS.map(([key]) => {
     const file = (c.equip || {})[key] || 0, cur = curEquip(c, key);
-    return `<label class="field"><span>${GEAR_LABELS[key] || key}</span>
+    return `<label class="field"><span>${GEAR_LABELS[key] || key}${rev(`equip:${key}`, ri)}</span>
       <button type="button" class="picker${dz(cur, file)}" data-eqri="${ri}" data-eq="${key}" data-val="${cur}" data-def="${file}">${esc(itemLabel(cur))}</button></label>`;
   }).join("");
 
@@ -532,7 +560,7 @@ function charCard(c) {
   const unites = Object.keys(uNames).length
     ? `<h4>Unite attacks <span class="muted" style="text-transform:none;letter-spacing:0">(level 0–3)</span></h4>
        <div class="grid sk">${Object.entries(uNames).map(([slot, u]) =>
-        `<label class="field" title="${esc(u.with || "")}"><span>${esc(u.name)}</span>
+        `<label class="field" title="${esc(u.with || "")}"><span>${esc(u.name)}${rev(`unite:${slot}`, ri)}</span>
           <input type="number" min="0" max="3" value="${curUnite(c, slot)}" data-uri="${ri}" data-uslot="${slot}" data-def="${(c.unites || [])[+slot] || 0}" class="${dz(curUnite(c, slot), (c.unites || [])[+slot] || 0).trim()}"></label>`).join("")}</div>`
     : "";
 
@@ -551,7 +579,7 @@ function charCard(c) {
       <span class="pill${(rcur || 0) >= 10 ? " on" : ""}">${esc(recName(rcur))}</span>
       <span class="lv">Lv ${lv} · HP ${curK(c, "maxHP")}</span></summary>
     <div class="char-body" data-roster="${ri}">
-      <div class="row" style="gap:8px;margin:6px 0 2px"><span class="muted">Recruitment</span>
+      <div class="row revrow" style="gap:8px;margin:6px 0 2px"><span class="muted">Recruitment</span>${rev("recruit", ri)}
         <select data-recruit="${ri}" class="${dz(rcur, c.recruited).trim()}" style="max-width:220px">${recOpts}</select></div>
       <div class="row presets" style="gap:6px;margin:6px 0 2px"><span class="muted">Preset</span>
         <button type="button" class="chip mini" data-preset="${ri}" title="stage max stats, HP, level, weapon Lv and all unites for review">★ Max out</button></div>
@@ -576,6 +604,21 @@ function curRune(c, sl)  { const e = CE[c.rosterIndex]; return e && e.runes && s
 function curEquip(c, k)  { const e = CE[c.rosterIndex]; return e && e.equip && k in e.equip ? e.equip[k] : ((c.equip || {})[k] || 0); }
 function curUnite(c, sl) { const e = CE[c.rosterIndex]; return e && e.unites && sl in e.unites ? e.unites[sl] : ((c.unites || [])[+sl] || 0); }
 const dz = (a, b) => (String(a) !== String(b) ? " dirty" : "");   // dirty class when staged ≠ file
+
+// Per-field restore (#4). Rendered always, revealed by refreshReverts() when the field is dirty.
+const rev = (what, ri) =>
+  `<button type="button" class="revert" data-revert="${what}"${ri == null ? "" : ` data-rri="${ri}"`}` +
+  ` title="Restore this field to the value in the file" aria-label="Restore this field">↺</button>`;
+
+// Sync every ↺ with its control's dirty state. Driven from one place rather than from each commit
+// handler, so it covers both "the user just edited" and "undo/redo just repainted".
+function refreshReverts(root) {
+  $$(".field, .row.revrow, .isotoggle, .ratefield", root || document).forEach((f) => {
+    const d = f.querySelector("input.dirty, select.dirty, button.picker.dirty") ||
+              (f.classList.contains("dirty-soft") ? f : null);
+    f.classList.toggle("has-dirty", !!d);
+  });
+}
 
 function wireChar(c) {
   const ri = c.rosterIndex;
@@ -905,6 +948,7 @@ window.addEventListener("DOMContentLoaded", () => {
   try { theme = localStorage.getItem("s4editor-theme") || "ocean"; } catch (e) {}
   applyTheme(theme);
   bindUndoKeys();
+  bindReverts();
   // Show the version of the *running* code (app.js), not whatever index.html shipped — so a
   // transient cache desync can never make the footer disagree with the update banner.
   const cr = $("footer .credit"); if (cr) cr.innerHTML = cr.innerHTML.replace(/·\s*v[\d.]+/, "· v" + APP_VERSION);

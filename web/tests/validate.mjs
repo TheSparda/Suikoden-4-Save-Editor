@@ -17,6 +17,7 @@ const ED = path.join(REPO, "Editor");
 // from app.js as a literal or a regex should come from here instead — that is the whole point of
 // the module existing.
 const S4Core = createRequire(import.meta.url)(path.join(WEB, "s4-core.js"));
+const css = fs.readFileSync(path.join(WEB, "style.css"), "utf8");
 let failures = 0;
 const ok = (m) => console.log("  ✓ " + m);
 const bad = (m) => { console.log("  ✗ " + m); failures++; };
@@ -170,6 +171,20 @@ console.log("Undo/redo wiring (#3):");
 // visible in the diff; it is a smoke check, not a proof.
 const stagedCalls = (app.match(/\bstaged\(/g) || []).length;
 (stagedCalls >= 12 ? ok : bad)(`mutation sites routed through staged(): ${stagedCalls}`);
+
+// 7d) Per-field restore (#4). The rule itself is tested in s4-core.mjs; these check the wiring.
+console.log("Per-field restore (#4):");
+(/S4Core\.revertStaged/.test(app) ? ok : bad)("app.js restores through the core's rule, not its own copy");
+(/data-isorevert/.test(iso) && /function revertField/.test(iso) ? ok : bad)("ISO editor has per-field restore");
+(/w\.buf\.set\(w\.orig\)/.test(iso) ? ok : bad)("ISO restore is a byte copy from orig, not a recomputation");
+(/class="revert"/.test(app) && /class="revert"/.test(iso) ? ok : bad)("both editors render ↺ buttons");
+(/\.revert \{ display:none/.test(css) ? ok : bad)("↺ is hidden until its field is dirty");
+(/has-dirty/.test(css) && /has-dirty/.test(app) && /has-dirty/.test(iso) ? ok : bad)("↺ visibility is driven by has-dirty in both editors");
+(/id="resetBtn"[^>]*>Revert all</.test(app) ? ok : bad)("save editor's Revert all is labelled");
+(/id="isoReset"[^>]*>Revert all</.test(iso) ? ok : bad)("ISO editor's Revert all is labelled");
+// Both Revert all buttons go through the journal, so the most destructive control is recoverable.
+(/staged\("Revert all"/.test(app) ? ok : bad)("save Revert all is undoable");
+(/label: "Revert all"/.test(iso) ? ok : bad)("ISO Revert all is undoable");
 
 // 8) version lockstep: app.js APP_VERSION === index.html footer version (B12 corollary)
 console.log("Version lockstep:");
