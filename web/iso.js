@@ -212,6 +212,7 @@
   // tabs belong to one disc, so they review and apply together as a single change set.
   const VIEWS = [
     ["encounter", "Encounters", drawEncounters],
+    ["changes", "Changes", drawChanges],
   ];
   const VIEW_KEY = "s4editor-iso-view";
   let VIEW = (() => { try { return localStorage.getItem(VIEW_KEY) || VIEWS[0][0]; } catch (e) { return VIEWS[0][0]; } })();
@@ -307,6 +308,97 @@
       try { localStorage.setItem(VIEW_KEY, VIEW); } catch (e) {}
       drawView();
     }));
+  }
+
+  // ---- Changes (#20 Half B) ------------------------------------------------
+  //
+  // Every other view reports what YOU staged this session — the review list is built as you edit,
+  // so it is a history, not a map. Open a disc somebody patched last month and the editor has
+  // nothing to say about it. This answers that instead.
+  //
+  // Half B only, and it needs no second file: every code patch this editor makes replaces a
+  // DOCUMENTED word, so `offBytes` already records what stock looked like. Half A (diffing
+  // against a pristine copy, decoded field by field) waits for #31 and a field map worth joining
+  // against.
+  //
+  // A field with no documented stock bytes is reported as "can't tell" rather than assumed
+  // stock — the encounter rate is a value, not a code patch, so there is no single stock word
+  // to compare it to and saying otherwise would be inventing a verdict (rule 1).
+  function discState(f) {
+    const w = win(f.key);
+    if (!w) return { state: "unknown" };
+    if (!f.offBytes) return { state: "notcode" };
+    const isStock = f.offBytes.every((b, i) => b === w.orig[i]);
+    const isPatched = f.onBytes && f.onBytes.every((b, i) => b === w.orig[i]);
+    return { state: isStock ? "stock" : isPatched ? "patched" : "unrecognised", w };
+  }
+
+  function drawChanges(host) {
+    const rows = FIELDS.map((f) => ({ f, ...discState(f) }));
+    const nonStock = rows.filter((r) => r.state === "patched" || r.state === "unrecognised");
+    const hexOf = (a) => [...a].map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+
+    host.innerHTML = `<div class="card">
+      <h3 class="sec">What is on this disc</h3>
+      <p class="muted" data-sum="Compares the disc you opened against the stock bytes this editor documents — so a disc patched months ago can still be read, with no pristine copy needed.">
+        This compares the disc you opened against the stock instruction words recorded for each
+        patch site, so a disc somebody patched months ago can be read back with no pristine copy
+        involved. It describes the disc as loaded, not the edits staged in this session.</p>
+      ${nonStock.length
+        ? `<div class="warnbox"><b>${nonStock.length} site${nonStock.length === 1 ? " is" : "s are"} not stock.</b>
+             This disc has been modified.</div>`
+        : `<div class="muted">Every documented patch site on this disc reads stock.</div>`}
+      <table class="invtbl"><thead><tr><th>Site</th><th>Address</th><th>On this disc</th><th></th></tr></thead><tbody>
+      ${rows.map((r) => {
+        const label = { stock: "stock", patched: "patched by this editor",
+                        unrecognised: "modified — not a shape this editor makes",
+                        notcode: "value field — no single stock word to compare",
+                        unknown: "not loaded" }[r.state];
+        const cls = r.state === "stock" ? "" : r.state === "notcode" ? "muted" : "dirtyrow";
+        // This column describes the disc AS LOADED, deliberately — it is a map, not a history.
+        // But a staged restore has to be visible here or clicking "Restore all to stock" looks
+        // like it did nothing, so the pending change is shown alongside rather than replacing it.
+        const staging = isDirty(r.f.key)
+          ? `<div class="muted" style="font-size:11px">staged: → ${hexOf(r.w.buf)}</div>` : "";
+        return `<tr class="${cls}">
+          <td>${esc(r.f.label)}</td>
+          <td class="sl">0x${r.f.off.toString(16).toUpperCase()}</td>
+          <td>${esc(label)}${r.w && r.state !== "notcode" ? `<div class="muted" style="font-size:11px">${hexOf(r.w.orig)}</div>` : ""}${staging}</td>
+          <td>${(r.state === "patched" || r.state === "unrecognised")
+                ? `<button type="button" class="chip mini" data-stock="${r.f.key}"${isDirty(r.f.key) ? " disabled" : ""}>${isDirty(r.f.key) ? "restore staged" : "↺ restore stock"}</button>` : ""}</td>
+        </tr>`;
+      }).join("")}
+      </tbody></table>
+      ${nonStock.length ? `<div class="toolbar" style="position:static;border:0;box-shadow:none;padding:10px 0 0">
+          <button id="isoStockAll">Restore all to stock</button></div>` : ""}
+    </div>`;
+
+    $$("[data-stock]").forEach((b) => (b.onclick = () => restoreStock([b.dataset.stock])));
+    const all = $("#isoStockAll");
+    if (all) all.onclick = () => restoreStock(nonStock.map((r) => r.f.key));
+  }
+
+  // Restoring STAGES, like everything else — the review sheet is not optional here either.
+  function restoreStock(keys) {
+    const before = {}, touched = [];
+    for (const k in WINDOWS) before[k] = WINDOWS[k].buf.slice();
+    for (const key of keys) {
+      const f = FIELDS.find((x) => x.key === key);
+      const w = win(key);
+      if (!f || !w || !f.offBytes) continue;
+      w.buf.set(f.offBytes, 0);
+      touched.push(f.label);
+    }
+    if (!touched.length) return setStatus("Nothing to restore.", "warn");
+    const after = {};
+    for (const k in WINDOWS) after[k] = WINDOWS[k].buf.slice();
+    JOURNAL.record({
+      label: `Restore ${touched.length} site${touched.length === 1 ? "" : "s"} to stock`,
+      undo: () => { for (const k in before) WINDOWS[k].buf.set(before[k]); drawView(); },
+      redo: () => { for (const k in after) WINDOWS[k].buf.set(after[k]); drawView(); },
+    });
+    drawView();
+    setStatus(`Staged a restore of ${touched.join(", ")} — review and save.`, "ok");
   }
 
   function refreshUndoButtons() {

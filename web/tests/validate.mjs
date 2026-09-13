@@ -146,8 +146,16 @@ const orphans = fieldViews.filter(([, v]) => !viewKeys.includes(v));
 (orphans.length === 0 ? ok : bad)(orphans.length
   ? `fields pointing at a view that doesn't exist (they would render nowhere): ${orphans.map(([k, v]) => `${k}→${v}`).join(", ")}`
   : "every field's view matches a declared tab");
-const empty = viewKeys.filter((v) => !iso.includes(`f.view === "${v}"`) && !fieldViews.some(([, fv]) => fv === v));
-(empty.length === 0 ? ok : bad)(empty.length ? `tabs with no fields and no draw filter: ${empty.join(", ")}` : "every tab has content");
+// Every view must have a draw function that actually exists. The original form of this check
+// also required each tab to own a subset of FIELDS, which was wrong: the Changes tab renders
+// *all* fields rather than a scope of its own, and a tab that reads no fields at all (a future
+// file browser, say) is legitimate too. What genuinely can't be allowed is a VIEWS entry naming
+// a function that isn't there — that throws on the first click.
+const drawFns = [...iso.matchAll(/^\s*\["(\w+)",\s*"[^"]+",\s*(\w+)\],/gm)].map((m) => [m[1], m[2]]);
+const missingDraw = drawFns.filter(([, fn]) => !new RegExp(`function\\s+${fn}\\s*\\(`).test(iso));
+(missingDraw.length === 0 ? ok : bad)(missingDraw.length
+  ? `tabs naming a draw function that doesn't exist: ${missingDraw.map(([k, fn]) => `${k}→${fn}()`).join(", ")}`
+  : `every tab has a draw function (${drawFns.map(([k]) => k).join(", ")})`);
 // The toolbar must live outside the tab host, or edits staged on one tab can't be applied from
 // another — that is the whole reason the shell is shaped this way.
 const hostIdx = iso.indexOf('<div id="isoViewHost">'), saveIdx = iso.indexOf('id="isoSave"');
