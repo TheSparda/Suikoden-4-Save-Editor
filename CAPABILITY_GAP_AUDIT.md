@@ -66,6 +66,8 @@ this part first.** Every later issue assumes #1–#4 exist.
 ---
 
 ## #1 — Extract shared logic into DOM-free `*-core.js` modules  **[PORT]**
+
+> 📋 **Tracked as [#2](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/2)**
 `area:infra` · `size:M` · `parity:s3`
 
 ### What S3 does
@@ -121,6 +123,8 @@ checks instead of 17 — and it will get worse with every feature added.
 ---
 
 ## #2 — Undo / redo for every staged edit  **[PORT]**
+
+> 📋 **Tracked as [#3](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/3)**
 `area:infra` · `size:M` · `parity:s3`
 
 ### What S3 does
@@ -152,6 +156,8 @@ correctness problem — a bulk scale applied to the wrong scope is unrecoverable
 ---
 
 ## #3 — Per-field `↺` restore and a global `Revert all`  **[PORT]**
+
+> 📋 **Tracked as [#4](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/4)**
 `area:infra` · `size:S` · `parity:s3`
 
 ### What S3 does
@@ -183,6 +189,8 @@ This is the cheapest user-visible win in the whole document.
 ---
 
 ## #4 — A real tab shell for the ISO editor  **[PORT]**
+
+> 📋 **Tracked as [#5](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/5)**
 `area:iso` · `size:S` · `parity:s3`
 
 ### What S3 does
@@ -212,6 +220,8 @@ the first tab, not after the third.
 ---
 
 ## #5 — `data-sum` long-description collapse  **[PORT]**
+
+> 📋 **Tracked as [#6](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/6)**
 `area:infra` · `size:S` · `parity:s3`
 
 ### What S3 does
@@ -246,6 +256,8 @@ exactly this and solved it once.
 ---
 
 ## #6 — Boot gate: don't let Pyodide block the ISO editor  **[PORT]**
+
+> 📋 **Tracked as [#7](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/7)**
 `area:infra` · `size:S` · `parity:s3`
 
 ### What S3 does
@@ -276,6 +288,8 @@ connection that's ~10 MB of dead time during which the working half of the app l
 ---
 
 ## #7 — Version-drift guard in CI  **[PORT]**
+
+> 📋 **Tracked as [#8](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/8)**
 `area:infra` · `size:S` · `parity:s3`
 
 ### What S3 does
@@ -299,6 +313,8 @@ Copy `web/tests/version-drift.mjs`, retarget the three regexes at the S4 filenam
 ---
 
 ## #8 — Playwright e2e suite with a synthetic ISO fixture  **[PORT]**
+
+> 📋 **Tracked as [#9](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/9)**
 `area:infra` · `size:L` · `parity:s3`
 
 ### What S3 does
@@ -344,6 +360,8 @@ S4's save editor is the strong half. These entries close it to parity.
 ---
 
 ## #9 — Inventory editor (party bags + storage)  **[RESEARCH → PORT]**
+
+> 📋 **Tracked as [#10](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/10)**
 `area:save` · `size:L`
 
 ### What S3 does
@@ -405,6 +423,8 @@ So the recipe is:
 ---
 
 ## #10 — Party / battle formation editor  **[PORT]**
+
+> 📋 **Tracked as [#11](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/11)**
 `area:save` · `size:M`
 
 ### What S3 does
@@ -435,6 +455,8 @@ plus ship crew, so the ordering question is, if anything, more load-bearing than
 ---
 
 ## #11 — Save health lint  **[PORT]**
+
+> 📋 **Tracked as [#12](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/12)**
 `area:save` · `size:M` · `parity:s3`
 
 ### What S3 does
@@ -488,6 +510,8 @@ own README warns about ("with a soft-lock warning" on the bulk recruit tab) but 
 ---
 
 ## #12 — Guide overlays on every field  **[PORT]**
+
+> 📋 **Tracked as [#13](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/13)**
 `area:save` · `area:reference` · `size:L`
 
 ### What S3 does
@@ -535,6 +559,8 @@ S4's advantage: the repo already ships `Guides/Suikoden IV - Combo Attacks Guide
 ---
 
 ## #13 — JSON snapshot export / import of a whole save  **[PORT]**
+
+> 📋 **Tracked as [#14](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/14)**
 `area:save` · `size:M` · `parity:s3`
 
 ### What S3 does
@@ -563,6 +589,8 @@ game data and can be pasted into an issue.
 ---
 
 ## #14 — Decode-time invariant checks  **[PORT]**
+
+> 📋 **Tracked as [#15](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/15)**
 `area:save` · `size:M` · `parity:s3`
 
 ### What S3 does
@@ -596,6 +624,8 @@ ones as a quiet note. Feed the same list into the #11 health tab.
 ---
 
 ## #15 — Character-detail parity: current HP, level-up preview, sharpen names
+
+> 📋 **Tracked as [#16](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/16)**
 `area:save` · `size:S`
 
 ### What S3 does
@@ -628,6 +658,8 @@ equipment slots and 5 unite slots. Genuinely missing:
 ---
 
 ## #16 — Recruitment guide ordering and a completion checklist
+
+> 📋 **Tracked as [#17](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/17)**
 `area:save` · `area:reference` · `size:L`
 
 ### What S3 does
@@ -669,6 +701,8 @@ how do I get them" question is identical.
 ---
 
 ## #17 — Region parity for the ISO editor
+
+> 📋 **Tracked as [#18](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/18)**
 `area:iso` · `size:M`
 
 ### What S3 does
@@ -707,6 +741,8 @@ Three entries here are **not** gated and should be built immediately: #18 (mod r
 ---
 
 ## #18 — Mod recipes (`.s4mod`) and `.xdelta` import/export  **[PORT]**
+
+> 📋 **Tracked as [#19](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/19)**
 `area:iso` · `size:M` · `parity:s3` · *not blocked*
 
 ### What S3 does
@@ -752,6 +788,8 @@ community" and "this project is a personal tool" — and since S4's edits are cu
 ---
 
 ## #19 — "Changes" tab: what is already on this disc + restore-to-stock  **[PORT]**
+
+> 📋 **Tracked as [#20](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/20)**
 `area:iso` · `size:L` · `parity:s3` · *not blocked*
 
 ### What S3 does
@@ -806,6 +844,8 @@ same table constants the views read, as S3 does.
 ---
 
 ## #20 — In-ELF text editor (UI strings, menus, battle messages)  **[RESEARCH]**
+
+> 📋 **Tracked as [#21](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/21)**
 `area:iso` · `size:M` · *not blocked by #30, but needs its own RE*
 
 ### What S3 does
@@ -850,6 +890,8 @@ So the work is:
 ---
 
 ## #21 — Character / item / rune renaming  **[BLOCKED on #30 or #20]**
+
+> 📋 **Tracked as [#22](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/22)**
 `area:iso` · `size:M`
 
 ### What S3 does
@@ -886,6 +928,8 @@ issue is about **disc-side** names: items, runes, characters in menus.
 ---
 
 ## #22 — Spell / magic parameter editor  **[BLOCKED on #30]**
+
+> 📋 **Tracked as [#23](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/23)**
 `area:iso` · `size:L`
 
 ### What S3 does
@@ -931,6 +975,8 @@ too noisy here… Needs a name-string or damage-value anchor from a guide to pin
 ---
 
 ## #23 — Unite attack editor  **[BLOCKED on #30]**
+
+> 📋 **Tracked as [#24](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/24)**
 `area:iso` · `size:M`
 
 ### What S3 does
@@ -950,6 +996,8 @@ almost certainly the same table region — **investigate them together.**
 ---
 
 ## #24 — Character growth, starting stats and skill caps  **[BLOCKED on #30]**
+
+> 📋 **Tracked as [#25](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/25)**
 `area:iso` · `size:L`
 
 ### What S3 does
@@ -981,6 +1029,8 @@ That is a good analysis and this issue does not contradict it — it specifies w
 ---
 
 ## #25 — Equipment, weapons, armour sets and food  **[BLOCKED on #30]**
+
+> 📋 **Tracked as [#26](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/26)**
 `area:iso` · `size:L`
 
 ### What S3 does
@@ -1007,6 +1057,8 @@ Four tabs:
 ---
 
 ## #26 — Shops  **[BLOCKED on #30]**
+
+> 📋 **Tracked as [#27](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/27)**
 `area:iso` · `size:M`
 
 ### What S3 does
@@ -1021,6 +1073,8 @@ and which story stages carry each item. S3 also recorded that a full shop mappin
 ---
 
 ## #27 — Per-area / per-map encounter tuning  **[BLOCKED on #30]**
+
+> 📋 **Tracked as [#28](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/28)**
 `area:iso` · `size:M`
 
 ### What S3 does
@@ -1064,6 +1118,8 @@ See #30 — this tiling test is the single most transferable technique in this d
 ---
 
 ## #28 — Enemy editor with idempotent bulk tuning  **[BLOCKED on #30]**
+
+> 📋 **Tracked as [#29](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/29)**
 `area:iso` · `size:XL`
 
 ### What S3 does
@@ -1105,6 +1161,8 @@ hypothesis to test after #30, not a settled result.
 ---
 
 ## #29 — Passive / support rune switches  **[BLOCKED on #30]**
+
+> 📋 **Tracked as [#30](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/30)**
 `area:iso` · `size:XL`
 
 ### What S3 does
@@ -1161,6 +1219,8 @@ tractable.
 ---
 
 ## #30 — ⭐ KEYSTONE: crack the `FILEDATA` archives  **[RESEARCH]**
+
+> 📋 **Tracked as [#31](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/31)**
 `area:research` · `size:XL` · **blocks #21–#29**
 
 ### The situation
@@ -1255,6 +1315,8 @@ automate exactly this loop.
 ---
 
 ## #31 — Sub-file browser (Reference → Files)  **[PORT, after #30]**
+
+> 📋 **Tracked as [#32](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/32)**
 `area:reference` · `size:M`
 
 ### What S3 does
@@ -1280,6 +1342,8 @@ they find. S4 has ~1,000 unlabeled sub-archives; a browser turns that from a wal
 ---
 
 ## #32 — Reverse-engineering notebook discipline  **[PORT]**
+
+> 📋 **Tracked as [#33](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/33)**
 `area:docs` · `size:S` (ongoing)
 
 ### What S3 does
@@ -1313,6 +1377,8 @@ recruitment, are exactly right. This issue is just to make it a **standing conve
 ---
 
 ## #33 — PCSX2 automation harness  **[PORT]**
+
+> 📋 **Tracked as [#34](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/34)**
 `area:infra` · `area:research` · `size:L` · `parity:s3`
 
 ### What S3 does
@@ -1358,6 +1424,8 @@ task in the whole document after #30, because it makes #30 tractable.
 ---
 
 ## #34 — Finish the recruitment ordering with a single-recruit controlled pair  **[RESEARCH]**
+
+> 📋 **Tracked as [#35](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/35)**
 `area:research` · `size:S`
 
 ### The situation
@@ -1387,6 +1455,8 @@ soft-lock states the UI currently only warns about in prose (see #11).
 ---
 
 ## #35 — Reference tab: from three tables to a research surface  **[PORT]**
+
+> 📋 **Tracked as [#36](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/36)**
 `area:reference` · `size:M`
 
 ### What S3 does
@@ -1428,6 +1498,8 @@ S4's Reference tab is three flat tables (113 characters, 519 items, 42 runes) re
 ---
 
 ## #36 — Item descriptions
+
+> 📋 **Tracked as [#37](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/37)**
 `area:reference` · `size:M` · *partly blocked on #30*
 
 ### What S3 does
@@ -1460,6 +1532,8 @@ corrupter, and they are cheap to adopt now and expensive to retrofit later.
 ---
 
 ## #37 — Adopt the "correct or absent, never wrong" rule explicitly
+
+> 📋 **Tracked as [#38](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/38)**
 `area:docs` · `size:S`
 
 Stated in `health-core.js` and `guide-core.js` and applied throughout S3: a check that needs a
@@ -1476,6 +1550,8 @@ write someone else's numbers over yours.
 ---
 
 ## #38 — Distinguish tested / untested / confirmed, per mechanism
+
+> 📋 **Tracked as [#39](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/39)**
 `area:docs` · `size:S`
 
 S3 marks every risky patch with what is actually known, and the distinction is fine-grained: a
@@ -1495,6 +1571,8 @@ encounter-rate slider likewise. Add a per-field verification state and render it
 ---
 
 ## #39 — Write every duplicate copy, and detect half-patched discs
+
+> 📋 **Tracked as [#40](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/40)**
 `area:iso` · `size:S` · *applies as soon as S4 edits data*
 
 Two S3 findings that cost real releases:
@@ -1512,6 +1590,8 @@ issues.
 ---
 
 ## #40 — Verify every patch site against pristine bytes before writing
+
+> 📋 **Tracked as [#41](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/41)**
 `area:iso` · `size:S`
 
 S3 checks that a site is still the shape it decoded before writing, and reverts byte-for-byte.
@@ -1527,6 +1607,8 @@ shapes and refuses anything else. Formalise it:
 ---
 
 ## #41 — Ship generated reference data, never runtime scraping
+
+> 📋 **Tracked as [#42](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/42)**
 `area:reference` · `size:S`
 
 S3's `Editor/build_*.py` scripts regenerate every reference table from a pristine disc plus saved
@@ -1541,6 +1623,8 @@ script that rebuilds it.
 ---
 
 ## #42 — Keep the privacy and no-game-data guarantees stated and tested
+
+> 📋 **Tracked as [#43](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/43)**
 `area:docs` · `size:S`
 
 Both repos ship no game data and both say so. S3 goes one step further: `web/tests/synth-iso.mjs`
@@ -1713,6 +1797,68 @@ S4 blocker.
    the bytes it means to and can never prove the game reads them as expected. That gap is what
    `tools/pcsx2/` exists to close (#33), and it is why S3 distinguishes *confirmed in play* from
    *patch applies cleanly* on every risky mechanism.
+
+---
+
+
+---
+
+# Appendix C — Audit entry → GitHub issue
+
+All 42 entries are filed. Audit numbering and issue numbering differ by one
+(issue #1 predates this audit).
+
+| Audit | Issue | Title |
+|---:|---:|---|
+| #1 | [#2](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/2) | Extract shared logic into DOM-free *-core.js modules |
+| #2 | [#3](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/3) | Undo / redo for every staged edit |
+| #3 | [#4](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/4) | Per-field ↺ restore and a global Revert all |
+| #4 | [#5](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/5) | A real tab shell for the ISO editor |
+| #5 | [#6](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/6) | data-sum long-description collapse |
+| #6 | [#7](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/7) | Boot gate: don't let Pyodide block the ISO editor |
+| #7 | [#8](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/8) | Version-drift guard in CI |
+| #8 | [#9](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/9) | Playwright e2e suite with a synthetic ISO fixture |
+| #9 | [#10](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/10) | Inventory editor (party bags + storage) |
+| #10 | [#11](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/11) | Party / battle formation editor |
+| #11 | [#12](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/12) | Save health lint |
+| #12 | [#13](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/13) | Guide overlays on every field |
+| #13 | [#14](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/14) | JSON snapshot export / import of a whole save |
+| #14 | [#15](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/15) | Decode-time invariant checks |
+| #15 | [#16](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/16) | Character-detail parity: current HP, level-up preview, sharpen names |
+| #16 | [#17](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/17) | Recruitment guide ordering and a completion checklist |
+| #17 | [#18](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/18) | Region parity for the ISO editor |
+| #18 | [#19](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/19) | Mod recipes (.s4mod) and .xdelta import/export |
+| #19 | [#20](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/20) | "Changes" tab: what is already on this disc + restore-to-stock |
+| #20 | [#21](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/21) | In-ELF text editor (UI strings, menus, battle messages) |
+| #21 | [#22](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/22) | Character / item / rune renaming |
+| #22 | [#23](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/23) | Spell / magic parameter editor |
+| #23 | [#24](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/24) | Unite attack editor |
+| #24 | [#25](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/25) | Character growth, starting stats and skill caps |
+| #25 | [#26](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/26) | Equipment, weapons, armour sets and food |
+| #26 | [#27](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/27) | Shops |
+| #27 | [#28](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/28) | Per-area / per-map encounter tuning |
+| #28 | [#29](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/29) | Enemy editor with idempotent bulk tuning |
+| #29 | [#30](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/30) | Passive / support rune switches |
+| #30 | [#31](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/31) | KEYSTONE: crack the FILEDATA archives |
+| #31 | [#32](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/32) | Sub-file browser (Reference → Files) |
+| #32 | [#33](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/33) | Reverse-engineering notebook discipline |
+| #33 | [#34](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/34) | PCSX2 automation harness |
+| #34 | [#35](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/35) | Finish the recruitment ordering with a single-recruit controlled pair |
+| #35 | [#36](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/36) | Reference tab: from three tables to a research surface |
+| #36 | [#37](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/37) | Item descriptions |
+| #37 | [#38](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/38) | Adopt the "correct or absent, never wrong" rule explicitly |
+| #38 | [#39](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/39) | Distinguish tested / untested / confirmed, per mechanism |
+| #39 | [#40](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/40) | Write every duplicate copy, and detect half-patched discs |
+| #40 | [#41](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/41) | Verify every patch site against pristine bytes before writing |
+| #41 | [#42](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/42) | Ship generated reference data, never runtime scraping |
+| #42 | [#43](https://github.com/TheSparda/Suikoden-4-Save-Editor/issues/43) | Keep the privacy and no-game-data guarantees stated and tested |
+
+Useful filters:
+
+- [`keystone`](https://github.com/TheSparda/Suikoden-4-Save-Editor/labels/keystone) — the one that unblocks the rest
+- [`blocked:filedata`](https://github.com/TheSparda/Suikoden-4-Save-Editor/labels/blocked%3Afiledata) — waiting on that keystone
+- [`parity:s3`](https://github.com/TheSparda/Suikoden-4-Save-Editor/labels/parity%3As3) — ports of proven Suikoden III code
+- [`size:S`](https://github.com/TheSparda/Suikoden-4-Save-Editor/labels/size%3AS) — half a day or less
 
 ---
 
