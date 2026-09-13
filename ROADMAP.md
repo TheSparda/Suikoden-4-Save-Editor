@@ -27,8 +27,9 @@ Three things dominate the dependency graph. Everything else is downstream of one
  (S)
 
 #31 KEYSTONE FILEDATA ──► #22 #23 #24 #25 #26 #27 #28 #29 #30 #32 · half of #17 #37
- (XL)   ▲
-        └── #34 PCSX2 harness (L) makes this tractable (Attack D)
+ └ #44 index (proven) ─► #45 entry semantics ─► #46 codec? ─► #47 content map
+        ▲
+        └── #34 PCSX2 harness (L) makes #47 tractable (Attack D)
 ```
 
 - **#2 is the first commit.** Today `validate.mjs` can only assert that strings appear in
@@ -74,8 +75,10 @@ out to need an emulator run (Attack D), that is a calendar dependency, not an en
 These are all size S and they are the constraints every later phase must satisfy. Writing them
 after the feature wave means retrofitting them.
 
-1. `.github/workflows/ci.yml` — `npm test` on push + PR. Node only; no disc, no BIOS, no Python
-   required (the Python roundtrip already skips cleanly).
+1. `.github/workflows/ci.yml` — `npm test` on push + PR. Node + Python, no disc, no BIOS, no
+   emulator. Python is installed deliberately rather than letting the round-trip skip itself:
+   `save-roundtrip.mjs` drives the real `s4save` codec, and it is the only test that exercises
+   the actual save format.
 2. `CLAUDE.md` carrying the four house rules, so they bind AI sessions too:
    - **#38** *correct or absent, never wrong* — a check missing its lookup doesn't run; a field
      with no verified data renders nothing.
@@ -92,8 +95,15 @@ after the feature wave means retrofitting them.
    per-mechanism verification state; write *every* duplicate copy and report the count; every
    field carries a `sig()` and a mismatched site refuses the write.
 
-**Exit:** CI green on every push. `CLAUDE.md` exists. #33 #38 #42 #43 #8 closed; #39 #40 #41
-closed as policy with their code halves tracked on the features they guard.
+**Exit:** CI green on every push. `CLAUDE.md` exists. #33 #38 #43 #8 closed; #39 #40 #41 closed
+as policy with their code halves tracked on the features they guard.
+
+**#42 stays open** — its rule is written (CLAUDE.md §4) but the generator backfill is not done.
+`s4_unites.json` and `s4_affinities.json` were extracted by hand and still have no script. The
+unite source (`Guides/…Combo Attacks Guide….pdf`) is committed so that generator can be written;
+the affinity source (OmegaDL50's GameFAQs FAQ) is **not** in the repo, so that one needs its
+source text committed first. Neither is stdlib-trivial — PDF text extraction is the actual work,
+and this repo's Python is stdlib-only by policy.
 
 ---
 
@@ -243,7 +253,7 @@ values at a consistent stride — a single value is noise, a record's worth is a
 
 Ordered by rising risk and falling certainty:
 
-1. **#32 sub-file browser first.** It is the first *user-visible* deliverable of #31 and it makes
+1. **#32 sub-file browser first.** It falls straight out of #44 and is the first *user-visible* deliverable of #31 and it makes
    further RE community-scalable: ~1,000 unlabeled sub-archives become a worklist instead of a
    wall. Read-only on purpose — a raw byte editor over thousands of unknown blobs is a footgun.
 2. **#22 renaming next** — validates the whole decompress → edit → recompress → fix-offsets loop
@@ -318,22 +328,34 @@ on-disc source. That converts every remaining Phase 6 blocker from a search prob
 Four corrections, recorded here and due to be appended to `Editor/Suikoden4_offsets.md` as a
 dated section per **#33**.
 
-**(a) #31's outer tiling milestone is already reached — the notebook's premise was wrong.**
-The notebook records *"BI2 (60MB) has 55 real entries"*. It doesn't. `FILEDATA.BI2` is **259
-back-to-back self-describing archives**, each with its own `0x82734927` header; the 55 entries are
-just the *first* archive's table. `FILEDATA.BI1` holds ~49 in its first 120 MB of 1.07 GB.
+**(a) #31 was two-thirds solved already. Re-scoped into #44 #45 #46 #47.**
+
+The notebook records *"BI2 (60MB) has 55 real entries"*. It doesn't — those are the **first
+archive's** entries. `FILEDATA.BI2` is **260** back-to-back self-describing archives (4,537
+entries); `FILEDATA.BI1` is **1,066** (57,771 entries). 1,326 archives, 62,308 sub-files.
 
 S3's tiling test — the technique #28 calls "the single most transferable in this document" —
-**passes 15/15 on both files, first try**: every archive's declared `total`, rounded up to a
-2048-byte sector, lands exactly on the next archive's header. Sector-aligned, zero gaps, zero
-overlaps.
+**passes outright, first try**: BI2 **258/258** consecutive pairs tile exactly, BI1 **1065/1065**,
+with BI1's last archive ending on the file's *exact* final byte (delta 0). Sector-aligned, zero
+gaps, zero overlaps.
 
-This means #31 does not start from zero. The outer directory is solved and `build_s4_subfile_index.py`
-can be written now, offline, with no emulator. What remains is the **inner** entry tables and the
-**flags=2 compression codec** — and note the first 8 entries of both files' first archives are all
-`flags=0` (stored), so the inner format can be validated on uncompressed payloads before the codec
-is cracked. **#31 should be re-scoped into three sub-issues** (outer index / inner entries /
-codec), because "XL, one issue" now understates how much of it is tractable today.
+And the codec — #31's hardest unknown — probably isn't one. For every `flags=2` entry,
+`size − (next.offset − this.offset) == 16`: **20,830 of 20,830, zero exceptions**. Six sampled
+payloads are 1.00–1.01× ratio, entropy 4.9–6.7 b/B against ~7.99 for compressed data, and visibly
+full of `00 00 80 3f` — IEEE-754 `1.0`. They are plain float/geometry data. There is also an
+undocumented third flag value (`flags=3`, 220 entries).
+
+So the keystone splits four ways, and only the last is genuinely open:
+
+| | | |
+|---|---|---|
+| **#44** | outer archive index | **proven**; needs committing as script + test |
+| **#45** | entry semantics — `flags`, the +16 rule, 15 unparsed archives | bounded |
+| **#46** | is there a codec at all? | bounded; 6 samples say no, 21,153 unswept |
+| **#47** | content map — locate the first game table | **the real remaining work** |
+
+Full evidence and search parameters are in `Editor/Suikoden4_offsets.md` under the dated
+*"FILEDATA re-examined"* section, with the two wrong claims superseded in place per #33.
 
 **(b) All the research inputs are on this machine but none are in the repo.**
 `Base ISO/Suikoden IV (USA).iso` (4.36 GB), `Cheats/` (two CT tables, a 588 KB pnach, the rune

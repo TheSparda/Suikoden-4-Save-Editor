@@ -6,8 +6,12 @@
 //     back to cache when offline. Keeps a new deploy fresh yet still works with no signal.
 //   - cross-origin (the Pyodide CDN — large, immutable, version-pinned URLs): cache-first,
 //     so the ~10 MB runtime downloads once and is instant thereafter.
-const CACHE = "s4editor-v10";
-const SHARE_CACHE = "s4editor-share";   // must match app.js (share-target hand-off)
+// Embeds the app version on purpose: an independently-bumped cache epoch is a second source of
+// truth for "which build is this", and this repo already shipped one version desync. Enforced by
+// web/tests/version-drift.mjs — bump this with APP_VERSION and the index.html footer.
+const CACHE = "s4editor-v1.6.5";
+const SHARE_CACHE = "s4editor-share";   // must match app.js (share-target hand-off); never versioned —
+                                        // it holds a file shared into the PWA that is waiting to be opened
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./iso.js", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png",

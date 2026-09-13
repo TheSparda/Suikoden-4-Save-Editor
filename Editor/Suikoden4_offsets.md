@@ -160,6 +160,13 @@ Playtime appears mirrored as several incrementing u32 copies (+0x108, +0x2E8, +0
 still **UNCONFIRMED** (RAM potch is +0x535EF8, but the save is a compacted structure).
 
 ## FILEDATA archive format (BI1 / BI2) — CRACKED
+> ⚠ **PARTLY SUPERSEDED 2026-09-12** — see *"FILEDATA re-examined"* at the end of this file.
+> The container header and entry-row shape below are **confirmed correct**. Two claims are
+> **wrong** and are kept here on purpose so the wrong premise stays on record:
+> (1) *"BI2 (60MB) has 55 real entries"* — that is the **first archive's** table; BI2 holds 260
+> back-to-back archives. (2) *"flags: 0 = stored, 2 = compressed"* — flags=2 payloads measure as
+> uncompressed.
+
 `FILEDATA.BI1` and `FILEDATA.BI2` are packed archives (NOT flat data). Header + file table:
 - `+0x00` u32 magic `0x82734927`
 - `+0x04` u32 = 0
@@ -241,3 +248,114 @@ damage curve. S4's ELF 2nd PT_LOAD (file 0x278480, vaddr 0x4F7480) was scanned t
 way; the ascending-field heuristic is too noisy here (hit only lookup ramps like a
 37,39,41,… scaling table at vaddr 0x589FB0, not spells). Needs a name-string or
 damage-value anchor from a guide to pin the table. Deferred.
+
+---
+
+## 2026-09-12 — FILEDATA re-examined: 1,326 archives, tiling proven, no codec found
+
+Supersedes parts of *"FILEDATA archive format (BI1 / BI2) — CRACKED"* above. Measured against
+the pristine NTSC-U disc. Every figure is a full-population count with zero exceptions unless
+labelled a sample. Tracked as #31 → #44 / #45 / #46 / #47.
+
+### 1. Each file is a *run* of archives, not one archive
+
+The earlier note read the first archive's entry table and took it for the whole file. It isn't.
+
+| File | LBA | Size | Archives | Entries |
+|---|---|---|---|---|
+| `FILEDATA.BI2` | 2,035,260 | 60,162,048 | **260** | 4,537 |
+| `FILEDATA.BI1` | 1,510,597 | 1,074,509,824 | **1,066** | 57,771 |
+
+Every archive carries its own `0x82734927` header. The "55 real entries" figure was archive 0
+of BI2 only; 259 further archives were never looked at.
+
+### 2. S3's FSECT.BIN tiling test passes on the outer level, first try
+
+`(total + 2047) // 2048 * 2048 == next_header_offset`:
+
+- **BI2 — 258/258** consecutive pairs tile exactly. Last archive ends at 60,160,000 of
+  60,162,048 (one sector of tail padding).
+- **BI1 — 1065/1065** tile exactly. Last archive ends at **1,074,509,824 — the file's exact
+  final byte, delta 0.**
+
+Sector-aligned, zero gaps, zero overlaps. Consequence: the index needs no magic scan — walk the
+chain from offset 0 reading each `total` and jumping. 1,326 small reads, not a 1 GB stream.
+
+### 3. Entry rows — confirmed shape, corrected reading
+
+```
+archive +0x00 u32 magic 0x82734927 | +0x04 u32 0 | +0x08 u32 total | +0x0C u32 0
+        +0x10 16-byte rows (id u32, flags u32, offset u32, size u32)
+              row[0] is a SENTINEL: its `id` field is the entry count, flags=32, off=0, size=0
+              offsets are archive-relative and 16-byte aligned (62,308 / 62,308 — 100%)
+```
+
+flags histogram — note the **third value, undocumented until now**:
+
+| File | flags=0 | flags=2 | flags=3 |
+|---|---|---|---|
+| BI2 | 3,840 | 697 | — |
+| BI1 | 37,095 | 20,456 | **220** (76–100 bytes each, BI1 only) |
+
+### 4. The +16 rule (flags=2 only) — exact
+
+For every flags=2 entry with a successor, sorted by offset:
+
+```
+size - (next.offset - this.offset) == 16          20,830 / 20,830
+```
+
+690/690 in BI2, 20,140/20,140 in BI1. Not a tendency. flags=0 overlaps its successor only
+10–20% of the time with scattered deltas (-80, -48, +16, -32, -60 …); flags=3, 4.5%. Whatever
+the +16 means, it is **specific to flags=2**. Structural explanation still unknown — #45.
+
+### 5. flags=2 is almost certainly NOT compression
+
+The earlier note reads flags=2 as compressed and sizes the whole problem around finding the
+codec. Six flags=2 payloads were pulled from BI2 (the first such entry in each of the first six
+archives), using the exact byte range the +16 rule gives:
+
+| archive | id | declared size | on-disc bytes | ratio | entropy | distinct bytes |
+|---|---|---|---|---|---|---|
+| `0x0` | `0x75fb` | 2,176 | 2,160 | 1.01× | 6.29 | 230 |
+| `0x178000` | `0x0e54` | 17,536 | 17,520 | 1.00× | 6.05 | 256 |
+| `0x194800` | `0x7711` | 2,176 | 2,160 | 1.01× | 4.89 | 208 |
+| `0x25e000` | `0x4d61` | 5,248 | 5,232 | 1.00× | 6.72 | 237 |
+| `0x325000` | `0x4d61` | 5,248 | 5,232 | 1.00× | 6.72 | 237 |
+| `0x35f000` | `0x6f9f` | 9,344 | 9,328 | 1.00× | 6.12 | 156 |
+
+Three independent reasons these are not compressed:
+
+1. **Ratio 1.00–1.01×.** Nothing is compressed; the 16-byte delta is the +16 rule, not a saving.
+2. **The bytes are legible.** All six are full of `00 00 80 3f` — IEEE-754 LE `1.0`. Also
+   `00 00 70 c1` (`-15.0`), `00 00 88 41` (`17.0`). Plain float data: transforms, vertices.
+3. **Entropy 4.9–6.7 bits/byte**, as few as 156 distinct values. Compressed output sits at ~7.99
+   with all 256 present.
+
+`zlib` and raw-deflate tried on all six: both fail immediately.
+
+**Search parameters, so this is not repeated:** candidates tried were zlib and raw-deflate only,
+on 6 of 21,153 flags=2 payloads, BI2 only, each read as `[entry.offset, next.offset)`. LZSS,
+LZARI (`s4lzari.py`), LZ77/4KB and LZMA were **not** tried, and BI1 was not sampled. The full
+sweep is #46 — six samples do not settle a 21,153-member population, they only move the prior.
+
+Note also that the "find the field tracking decompressed size" step is moot either way: if
+flags=2 *were* compressed, the decompressed size is already the entry's `size` and the
+compressed length is `next.offset - this.offset`.
+
+### 6. Known gaps
+
+- 15 of BI1's 1,066 archives have an entry-count sentinel outside the plausible range and were
+  skipped. They tile correctly at the outer level, so they are real archives — either the count
+  field is being misread or they use a variant layout. #45.
+- No content mapping attempted yet. The fingerprints available are 519 item ids, 42 rune ids,
+  113 roster indices, 29 unite combos and the numbers in `Cheats/S4 Rune List.pdf`. #47.
+- PAL (`SLES-529.13`) not checked. The save layout matched across regions; this has not been
+  assumed for the disc.
+
+### 7. What this changes
+
+The earlier STATUS line names two unknowns — the codec and the content map — and defers the
+whole thing as "big effort". Re-reading it: the outer directory is solved (#44), the codec is
+probably a misreading rather than a hard problem (#46), the entry semantics are a bounded format
+question (#45), and only the content map (#47) is genuinely open.

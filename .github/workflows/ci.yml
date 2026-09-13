@@ -1,0 +1,49 @@
+# CI for the Suikoden IV Save Editor (issue #8, #43 — and the prerequisite both assumed existed).
+#
+# Runs the headless suite from web/tests. Deliberately needs nothing that isn't in the repo: no
+# disc, no BIOS, no emulator, no saves. Per CLAUDE.md rule 3 the research inputs (Base ISO/,
+# Cheats/, Saves/) are gitignored and live only on the maintainer's machine, so any test that
+# wants them skips cleanly here rather than failing.
+#
+# Python is installed because save-roundtrip.mjs drives the real stdlib-only s4save module through
+# decode → edit → write → re-decode. It skips itself when python3 is absent, but running it for
+# real is the point — it is the only test that exercises the actual save codec.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # no-game-data.mjs inspects tracked blobs via git; a shallow clone is fine, but it
+          # needs the repo to actually be a git checkout rather than an export.
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Confirm the save engine is importable (stdlib only, no pip install)
+        run: python3 -c "import sys; sys.path.insert(0, 'Editor'); import s4save, s4files, s4lzari; print('save engine OK')"
+
+      - name: Run the test suite
+        working-directory: web/tests
+        run: npm test
