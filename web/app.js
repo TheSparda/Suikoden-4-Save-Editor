@@ -115,9 +115,11 @@ def load_reference():
   // Reference data the JS side renders directly. Each is optional: a table that fails to load
   // leaves its view empty rather than breaking the tab (CLAUDE.md rule 1).
   try { UNITES = await (await fetch(`${EDITOR_DIR}/s4_unites.json`)).json(); } catch (e) { UNITES = {}; }
-  try { const d = await (await fetch(`${EDITOR_DIR}/s4_rune_desc.json`)).json(); delete d._note;
-        RUNE_DESC = Object.fromEntries(Object.entries(d).map(([k, v]) => [parseInt(k, 16), v])); }
-  catch (e) { RUNE_DESC = {}; }
+  // Rune descriptions (#37) are not extracted yet — Cheats/S4 Rune List.pdf turned out to be the
+  // Rune Affinity FAQ, not a description list. RUNE_DESC stays empty and the picker renders no
+  // description, which is the correct-or-absent behaviour. When s4_rune_desc.json exists, fetch
+  // it here; deliberately NOT requested until then, since a request that is known to 404 is
+  // noise in the console and in the e2e suite.
   PY = py;
   bootProgress(100, "Ready", "done");
   return py;
